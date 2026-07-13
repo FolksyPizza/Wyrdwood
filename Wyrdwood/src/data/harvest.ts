@@ -21,6 +21,7 @@ export interface HarvestDef {
 
 export type HarvestType =
   | 'tree'
+  | 'pine'
   | 'rock'
   | 'bush'
   | 'flower'
@@ -40,6 +41,16 @@ export const HARVEST: Record<HarvestType, HarvestDef> = {
     drops: [
       { itemId: 'wood', count: 4 },
       { itemId: 'resin', count: 1, chance: 0.35 },
+    ],
+    verb: 'Chop',
+  },
+  // Conifer: more wood, more resin, and it takes longer to fell.
+  pine: {
+    hits: 8,
+    tool: { kind: 'axe', hits: 3 },
+    drops: [
+      { itemId: 'wood', count: 5 },
+      { itemId: 'resin', count: 1, chance: 0.6 },
     ],
     verb: 'Chop',
   },

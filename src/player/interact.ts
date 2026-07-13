@@ -14,6 +14,7 @@ import type { SkillId } from '../data/skills';
 
 const HARVEST_SKILL: Record<ScatterType, SkillId> = {
   tree: 'woodcutting',
+  pine: 'woodcutting',
   rock: 'mining',
   bush: 'foraging',
   flower: 'foraging',
@@ -27,6 +28,7 @@ const HARVEST_SKILL: Record<ScatterType, SkillId> = {
 
 const SCATTER_NAMES: Record<ScatterType, string> = {
   tree: 'Tree',
+  pine: 'Pine',
   rock: 'Rock',
   bush: 'Berry Bush',
   flower: 'Flower',

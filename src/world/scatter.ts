@@ -7,6 +7,7 @@ import { applyARM, loadPBR, makeLeafCluster } from '../render/assets';
 
 export type ScatterType =
   | 'tree'
+  | 'pine'
   | 'rock'
   | 'bush'
   | 'flower'
@@ -34,6 +35,11 @@ export interface ScatterInstance {
 
 /** Spacing of the deterministic scatter grid within a chunk (world units). */
 const CELL = 4;
+
+function smoothstep01(e0: number, e1: number, x: number): number {
+  const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
+  return t * t * (3 - 2 * t);
+}
 
 /** Deterministically list scatter objects for a chunk (seed + coords → same result). */
 export function scatterForChunk(
@@ -63,7 +69,14 @@ export function scatterForChunk(
       // Cumulative-probability pick across all scatter types for this cell.
       let type: ScatterType | null = null;
       let acc = biome.treeDensity;
-      if (roll < acc) type = 'tree';
+      if (roll < acc) {
+        // Which species. Conifers take over with altitude and in the damp — a
+        // forest of one tree is the thing that reads as wallpaper, and the
+        // handover between species is most of what gives a treeline its shape.
+        const conifer = cellHash(terrain.seed, cellX, cellZ, 6);
+        const pineChance = smoothstep01(12, 40, y) * 0.75 + terrain.moistureAt(x, z) * 0.35;
+        type = conifer < pineChance ? 'pine' : 'tree';
+      }
       else if (roll < (acc += biome.rockDensity)) type = 'rock';
       else if (roll < (acc += biome.bushDensity)) type = 'bush';
       else if (roll < (acc += biome.flowerDensity)) type = 'flower';
@@ -98,9 +111,18 @@ export class ScatterAssets {
   // silhouette doesn't read as a hexagon at close range, and the UVs are scaled
   // so the bark tiles at roughly life size rather than being stretched up 3.4 m.
   readonly trunkGeo = makeTrunk(0.16, 0.34, 3.4);
+  /** Real limbs. A canopy floating on a bare pole is the classic procedural
+   * tree; branches are what connect the two and let you see structure through
+   * the leaves. */
+  readonly branchGeo = makeBranches();
   readonly foliageGeo = makeCanopy(2.0, 2.4, 16, 0.0);
   readonly foliage2Geo = makeCanopy(1.5, 1.9, 12, 1.5); // upper tier
   readonly foliage3Geo = makeCanopy(0.95, 1.5, 8, 2.6); // crown
+
+  // ── Conifer ──────────────────────────────────────────────────────────────
+  readonly pineTrunkGeo = makeTrunk(0.08, 0.30, 7.2);
+  readonly pineCanopyGeo = makeConifer();
+  readonly pineMat = makeLeafClusterMaterial('foliage/pine_needles', PINE_RECTS, 0x9143);
   readonly rockGeo = makeRock();
   readonly bushGeo = makeCanopy(0.8, 0.9, 9, 0.0);
   /** Berries, nestled *inside* the bush's leaf shell rather than sitting on it. */
@@ -165,6 +187,7 @@ export class ScatterAssets {
 
   constructor() {
     this.trunkGeo.translate(0, 1.7, 0); // pivot at base
+    this.pineTrunkGeo.translate(0, 3.6, 0);
     // The canopy tiers already stagger themselves vertically (makeCanopy's
     // yOffset), so they all sit on the same base — just below the trunk's top.
     this.foliageGeo.translate(0, 2.7, 0);
@@ -180,6 +203,76 @@ export class ScatterAssets {
     this.mushStemGeo.translate(0, 0.12, 0);
     this.mushCapGeo.translate(0, 0.24, 0);
   }
+}
+
+/** The two clean needle sprigs in the scanned pine atlas. The rest of that image
+ * is smeared UV filler from the photogrammetry unwrap. */
+const PINE_RECTS = [
+  { u: 0.029, v: 0.556, w: 0.2, h: 0.41 },
+  { u: 0.674, v: 0.478, w: 0.269, h: 0.181 },
+];
+
+/**
+ * A conifer: rings of needle cards on a tall spike, each ring wider than the one
+ * above it and angled downward.
+ *
+ * A spruce is not a ball on a stick — it is a *cone of drooping tiers*, and that
+ * silhouette is basically the whole species. Getting the taper and the downward
+ * tilt right matters far more than the texture does.
+ */
+function makeConifer(): THREE.BufferGeometry {
+  const geos: THREE.BufferGeometry[] = [];
+  const rng = mulberry32(0xc04f1e);
+  const RINGS = 7;
+  const BOTTOM = 1.4; // where the lowest branches start
+  const TOP = 7.6;
+
+  for (let r = 0; r < RINGS; r++) {
+    const t = r / (RINGS - 1); // 0 at the bottom ring, 1 at the tip
+    const y = BOTTOM + t * (TOP - BOTTOM);
+    // Taper: wide skirt, narrow crown. Slightly convex, not a straight cone.
+    const radius = 2.1 * Math.pow(1 - t, 0.78) + 0.12;
+    const cards = Math.max(3, Math.round(7 * (1 - t) + 3));
+
+    for (let i = 0; i < cards; i++) {
+      const theta = (i / cards) * Math.PI * 2 + r * 0.9 + rng() * 0.4;
+      const size = radius * (0.95 + rng() * 0.4);
+      const q = new THREE.PlaneGeometry(size * 1.5, size);
+      // Branches hang. Tilt the card down and outward.
+      q.rotateX(0.42 + rng() * 0.2);
+      q.rotateY(theta);
+      q.translate(
+        Math.cos(theta) * radius * 0.55,
+        y + (rng() - 0.5) * 0.25,
+        Math.sin(theta) * radius * 0.55,
+      );
+      geos.push(q);
+    }
+  }
+  return mergeGeometries(geos);
+}
+
+/**
+ * Branches for a broadleaf: a few tapered limbs sweeping up and out of the trunk
+ * into the canopy. Without them the crown floats on a bare pole, which is the
+ * single most obvious sign of a procedural tree.
+ */
+function makeBranches(): THREE.BufferGeometry {
+  const geos: THREE.BufferGeometry[] = [];
+  const rng = mulberry32(0xb2a4c);
+  const N = 6;
+  for (let i = 0; i < N; i++) {
+    const theta = (i / N) * Math.PI * 2 + rng() * 0.5;
+    const len = 1.5 + rng() * 0.9;
+    const g = new THREE.CylinderGeometry(0.035, 0.085, len, 5);
+    // Pivot at the base of the limb, then sweep it out and up.
+    g.translate(0, len / 2, 0);
+    g.rotateZ(0.75 + rng() * 0.35); // lean outward
+    g.rotateY(theta);
+    g.translate(0, 2.3 + rng() * 0.8, 0); // spring from partway up the trunk
+    geos.push(g);
+  }
+  return mergeGeometries(geos);
 }
 
 /** Tapered trunk with bark UVs scaled to life size (rather than stretched). */
@@ -670,6 +763,7 @@ export function buildScatterMeshes(
   instances: ScatterInstance[],
 ): THREE.InstancedMesh[] {
   const trees = instances.filter((i) => i.type === 'tree');
+  const pines = instances.filter((i) => i.type === 'pine');
   const rocks = instances.filter((i) => i.type === 'rock');
   const bushes = instances.filter((i) => i.type === 'bush');
   const flowers = instances.filter((i) => i.type === 'flower');
@@ -726,6 +820,9 @@ export function buildScatterMeshes(
   };
 
   make(assets.trunkGeo, assets.trunkMat, trees, 'trunks', true, 0.25);
+  make(assets.branchGeo, assets.trunkMat, trees, 'branches', true, 0.25);
+  make(assets.pineTrunkGeo, assets.trunkMat, pines, 'pineTrunks', true, 0.25);
+  make(assets.pineCanopyGeo, assets.pineMat, pines, 'pineCanopy', true, 0.7);
   make(assets.foliageGeo, assets.foliageMat, trees, 'foliage', true, 1);
   make(assets.foliage2Geo, assets.foliage2Mat, trees, 'foliage2', true, 1);
   make(assets.foliage3Geo, assets.foliage3Mat, trees, 'foliage3', true, 1);
