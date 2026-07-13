@@ -92,6 +92,10 @@ export interface Settings {
   viewRadius: number;
   /** Post-processing master switch. */
   postFX: boolean;
+  /** Ambient occlusion (GTAO) — contact shadows in creases and undergrowth. */
+  ao: boolean;
+  /** Anti-aliasing (SMAA). Off, every edge stair-steps and the foliage shimmers. */
+  antialias: boolean;
   /** Bloom strength (0 = off). */
   bloom: number;
   /** Vignette darkness (0 = off). */
@@ -124,13 +128,15 @@ type GraphicsPreset = Pick<
   | 'postFX'
   | 'bloom'
   | 'vignette'
+  | 'ao'
+  | 'antialias'
 >;
 
 export const PRESETS: Record<Exclude<QualityPreset, 'custom'>, GraphicsPreset> = {
-  low:    { shadows: false, shadowMapSize: 1024, maxPixelRatio: 1,    grassDensity: 0,    grassRadius: 0, viewRadius: 3, postFX: false, bloom: 0,    vignette: 0 },
-  medium: { shadows: true,  shadowMapSize: 1024, maxPixelRatio: 1.25, grassDensity: 0.55, grassRadius: 1, viewRadius: 4, postFX: true,  bloom: 0.2,  vignette: 0.9 },
-  high:   { shadows: true,  shadowMapSize: 2048, maxPixelRatio: 1.5,  grassDensity: 1,    grassRadius: 1, viewRadius: 5, postFX: true,  bloom: 0.3,  vignette: 1.1 },
-  ultra:  { shadows: true,  shadowMapSize: 4096, maxPixelRatio: 2,    grassDensity: 1.3,  grassRadius: 2, viewRadius: 7, postFX: true,  bloom: 0.35, vignette: 1.1 },
+  low:    { shadows: false, shadowMapSize: 1024, maxPixelRatio: 1,    grassDensity: 0,    grassRadius: 0, viewRadius: 3, postFX: false, bloom: 0,    vignette: 0,   ao: false, antialias: false },
+  medium: { shadows: true,  shadowMapSize: 1024, maxPixelRatio: 1.25, grassDensity: 0.55, grassRadius: 1, viewRadius: 4, postFX: true,  bloom: 0.2,  vignette: 0.9, ao: false, antialias: true },
+  high:   { shadows: true,  shadowMapSize: 2048, maxPixelRatio: 1.5,  grassDensity: 1,    grassRadius: 1, viewRadius: 5, postFX: true,  bloom: 0.3,  vignette: 1.1, ao: true,  antialias: true },
+  ultra:  { shadows: true,  shadowMapSize: 4096, maxPixelRatio: 2,    grassDensity: 1.3,  grassRadius: 2, viewRadius: 7, postFX: true,  bloom: 0.35, vignette: 1.1, ao: true,  antialias: true },
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -176,6 +182,8 @@ export function quality(): GraphicsPreset {
     postFX: settings.postFX,
     bloom: settings.bloom,
     vignette: settings.vignette,
+    ao: settings.ao,
+    antialias: settings.antialias,
   };
 }
 

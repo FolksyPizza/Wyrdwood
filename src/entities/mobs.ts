@@ -24,11 +24,16 @@ export interface Mob {
   /** Set when hit — passive mobs flee, neutral ones may retaliate. */
   provoked: boolean;
   walkPhase: number;
+  /** Current ground speed (m/s) — eased towards the state's target. */
+  speed: number;
   /** Skeletal animation for the rigged model. */
   mixer: THREE.AnimationMixer | null;
   anims: MobAnims | null;
   current: THREE.AnimationAction | null;
 }
+
+/** How much of its top speed an animal uses when just wandering around. */
+const WANDER_FRACTION = 0.35;
 
 const MAX_MOBS = 24;
 const SPAWN_MIN = 24;
@@ -162,6 +167,7 @@ export class MobManager {
       mesh,
       provoked: false,
       walkPhase: 0,
+      speed: 0,
       mixer,
       anims,
       current: null,
@@ -254,8 +260,22 @@ export class MobManager {
 
   private move(mob: Mob, dt: number): void {
     const moving = mob.state === 'wander' || mob.state === 'chase' || mob.state === 'flee';
-    if (moving) {
-      const speed = mob.state === 'flee' ? mob.def.fleeSpeed : mob.def.speed;
+
+    // A wandering animal *ambles* — it does not travel at its top speed. Using
+    // def.speed for idle wandering is why the herds looked like they were being
+    // chased by something invisible.
+    let targetSpeed = 0;
+    if (mob.state === 'wander') targetSpeed = mob.def.speed * WANDER_FRACTION;
+    else if (mob.state === 'chase') targetSpeed = mob.def.speed;
+    else if (mob.state === 'flee') targetSpeed = mob.def.fleeSpeed;
+
+    // Ease into and out of that speed instead of snapping to it. Animals have
+    // mass: they lean into a run and coast to a stop, and the gait animation is
+    // driven from this, so a smooth speed makes a smooth walk cycle too.
+    const accel = mob.state === 'flee' ? 6 : 2.5;
+    mob.speed += (targetSpeed - mob.speed) * Math.min(1, accel * dt);
+
+    if (moving || mob.speed > 0.05) {
       const dx = mob.targetX - mob.x;
       const dz = mob.targetZ - mob.z;
       const d = Math.hypot(dx, dz);
@@ -263,9 +283,14 @@ export class MobManager {
         const desiredYaw = Math.atan2(dx, dz);
         let diff = desiredYaw - mob.yaw;
         diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-        mob.yaw += THREE.MathUtils.clamp(diff, -3 * dt, 3 * dt);
-        const nx = mob.x + Math.sin(mob.yaw) * speed * dt;
-        const nz = mob.z + Math.cos(mob.yaw) * speed * dt;
+        // Turn rate scales with how fast it's going: a walking deer can pivot,
+        // a galloping one has to arc. Snapping the heading instantly is the
+        // other half of why the movement read as robotic.
+        const turnRate = 1.4 + 1.6 / (1 + mob.speed * 0.35);
+        mob.yaw += THREE.MathUtils.clamp(diff, -turnRate * dt, turnRate * dt);
+
+        const nx = mob.x + Math.sin(mob.yaw) * mob.speed * dt;
+        const nz = mob.z + Math.cos(mob.yaw) * mob.speed * dt;
         const ny = this.terrain.height(nx, nz);
         // Don't walk into water or up cliffs.
         if (ny > SEA_LEVEL + 0.4 && this.terrain.slopeAt(nx, nz) < 1.1) {
@@ -285,11 +310,24 @@ export class MobManager {
    * runs, and lunges when it strikes — instead of swinging four boxes on hinges.
    */
   private animate(mob: Mob, dt: number): void {
-    const moving = mob.state === 'wander' || mob.state === 'chase' || mob.state === 'flee';
-    const running = mob.state === 'chase' || mob.state === 'flee';
+    // Pick the gait from how fast it's actually moving, not from the AI state —
+    // an animal easing out of a run should finish in a walk, not cut to idle.
     const want =
-      mob.state === 'attack' ? 'attack' : running ? 'run' : moving ? 'walk' : 'idle';
+      mob.state === 'attack'
+        ? 'attack'
+        : mob.speed > mob.def.speed * 0.75
+          ? 'run'
+          : mob.speed > 0.25
+            ? 'walk'
+            : 'idle';
     playClip(mob, want);
+
+    // Match the clip's cadence to the real speed, or the feet skate.
+    const cur = mob.current;
+    if (cur && want === 'walk') cur.timeScale = THREE.MathUtils.clamp(mob.speed / 1.4, 0.5, 1.6);
+    else if (cur && want === 'run') cur.timeScale = THREE.MathUtils.clamp(mob.speed / 5, 0.6, 1.5);
+    else if (cur) cur.timeScale = 1;
+
     mob.mixer?.update(dt);
   }
 }

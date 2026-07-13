@@ -5,6 +5,8 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { VignetteShader } from 'three/addons/shaders/VignetteShader.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
+import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { onSettingsChange, quality, settings } from '../data/settings';
 
 /**
@@ -34,6 +36,62 @@ const GRADE_SHADER = {
 };
 
 /**
+ * Teach GTAO about alpha cutouts.
+ *
+ * GTAOPass builds its depth+normal buffer by setting `scene.overrideMaterial` to
+ * one shared MeshNormalMaterial — and that material's shader contains no alpha
+ * chunk at all, so it cannot cut out. Every grass tuft and leaf card therefore
+ * writes its **whole quad** into the depth buffer, and the AO shades each one as
+ * though it were a solid box: you get a dark rectangle around every blade of
+ * grass.
+ *
+ * The fix is to stop using one override material and instead swap in a *matching*
+ * normal material per source material — one that discards the same texels the
+ * real material does. Cached per material, so this is a map lookup per mesh.
+ */
+const normalMatCache = new WeakMap<THREE.Material, THREE.MeshNormalMaterial>();
+
+function cutoutNormalMaterial(src: THREE.Material): THREE.MeshNormalMaterial {
+  const hit = normalMatCache.get(src);
+  if (hit) return hit;
+
+  const std = src as THREE.MeshStandardMaterial;
+  const out = new THREE.MeshNormalMaterial();
+  out.blending = THREE.NoBlending;
+  out.side = std.side ?? THREE.FrontSide;
+
+  if (std.alphaTest > 0 && (std.alphaMap || std.map)) {
+    // Where the cutout lives: a separate greyscale alphaMap (grass, ferns), or
+    // the alpha channel of the colour map (the composited leaf-cluster cards).
+    const cut = std.alphaMap ?? std.map!;
+    const fromAlphaChannel = !std.alphaMap;
+    const threshold = std.alphaTest;
+
+    out.onBeforeCompile = (sh) => {
+      sh.uniforms['uCut'] = { value: cut };
+      sh.vertexShader =
+        'varying vec2 vCutUv;\n' +
+        sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vCutUv = uv;');
+      sh.fragmentShader =
+        'uniform sampler2D uCut;\nvarying vec2 vCutUv;\n' +
+        sh.fragmentShader.replace(
+          'void main() {',
+          `void main() {
+             vec4 cutTex = texture2D(uCut, vCutUv);
+             float cutA = ${fromAlphaChannel ? 'cutTex.a' : 'cutTex.g'};
+             if (cutA < ${threshold.toFixed(3)}) discard;
+          `,
+        );
+    };
+    // Distinct cache key, or three reuses one compiled program for all of them.
+    out.customProgramCacheKey = () => `ao-cutout-${src.uuid}`;
+  }
+
+  normalMatCache.set(src, out);
+  return out;
+}
+
+/**
  * Owns the WebGL renderer, scene, camera, base lighting/atmosphere, and the
  * post-processing chain (bloom + vignette). Gameplay systems add/remove
  * objects from `scene`.
@@ -49,6 +107,8 @@ export class GameRenderer {
   private bloomPass!: UnrealBloomPass;
   private vignettePass!: ShaderPass;
   private gradePass!: ShaderPass;
+  private aoPass!: GTAOPass;
+  private smaaPass!: SMAAPass;
 
   constructor(container: HTMLElement) {
     const q = quality();
@@ -90,11 +150,17 @@ export class GameRenderer {
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(q.shadowMapSize, q.shadowMapSize);
     this.sun.shadow.camera.near = 1;
-    this.sun.shadow.camera.far = 200;
-    this.sun.shadow.bias = -0.0004; // kills shadow acne
-    this.sun.shadow.normalBias = 0.04; // kills peter-panning
-    this.sun.shadow.radius = 3; // softer PCF edges
-    const s = 48;
+    this.sun.shadow.camera.far = 320;
+    this.sun.shadow.bias = -0.0002; // kills shadow acne
+    this.sun.shadow.normalBias = 0.03; // kills peter-panning
+    this.sun.shadow.radius = 4; // softer PCF edges
+    // Half-width of the sun's shadow box, in metres. At 48 m the shadow map ran
+    // out a couple of trees away and the whole middle distance was flat and
+    // unshadowed, which is a large part of why the landscape looked fake — a
+    // real hillside is legible precisely *because* of where its shadows fall.
+    // The box follows the player (DayNight orbits the sun around them), so this
+    // is a radius around the camera, not a world bound.
+    const s = 95;
     this.sun.shadow.camera.left = -s;
     this.sun.shadow.camera.right = s;
     this.sun.shadow.camera.top = s;
@@ -118,6 +184,72 @@ export class GameRenderer {
     // in HDR would flatten every highlight and undo the ACES tone mapping.
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
+
+    // Ambient occlusion. This is the single biggest thing separating a scene
+    // that looks rendered from one that looks photographed: in reality, ambient
+    // sky light can't reach into the crease where a trunk meets the ground, or
+    // between blades of grass, or under a rock — so those places go darker.
+    // Without it every object looks pasted *onto* the ground rather than sitting
+    // *in* it, no matter how good the textures are. GTAO computes it from the
+    // depth+normal buffers, so it costs no extra geometry.
+    const ao = new GTAOPass(this.scene, this.camera, window.innerWidth, window.innerHeight);
+    ao.updateGtaoMaterial({
+      radius: 0.5, // metres — contact-scale, not a big soft dome
+      distanceExponent: 1.0,
+      thickness: 1.0,
+      scale: 1.0,
+      samples: 16,
+      screenSpaceRadius: false,
+    });
+    // Replace GTAO's shared-override depth/normal render with a per-material one
+    // that respects alpha cutouts (see cutoutNormalMaterial above).
+    const swapped: { mesh: THREE.Mesh; mat: THREE.Material | THREE.Material[] }[] = [];
+    const clearColour = new THREE.Color();
+    type OverrideFn = (
+      renderer: THREE.WebGLRenderer,
+      overrideMaterial: THREE.Material,
+      renderTarget: THREE.WebGLRenderTarget,
+      clearColor: number,
+      clearAlpha: number,
+    ) => void;
+    (ao as unknown as { _renderOverride: OverrideFn })._renderOverride = (
+      renderer,
+      _overrideMaterial,
+      renderTarget,
+      clearColor,
+      clearAlpha,
+    ) => {
+      renderer.getClearColor(clearColour);
+      const originalClearAlpha = renderer.getClearAlpha();
+      const originalAutoClear = renderer.autoClear;
+
+      renderer.setRenderTarget(renderTarget);
+      renderer.autoClear = false;
+      if (clearColor !== undefined && clearColor !== null) {
+        renderer.setClearColor(clearColor);
+        renderer.setClearAlpha(clearAlpha || 0.0);
+        renderer.clear();
+      }
+
+      swapped.length = 0;
+      this.scene.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        if (!mesh.isMesh || !mesh.material) return;
+        swapped.push({ mesh, mat: mesh.material });
+        mesh.material = Array.isArray(mesh.material)
+          ? mesh.material.map(cutoutNormalMaterial)
+          : cutoutNormalMaterial(mesh.material);
+      });
+      renderer.render(this.scene, this.camera);
+      for (const s of swapped) s.mesh.material = s.mat;
+
+      renderer.autoClear = originalAutoClear;
+      renderer.setClearColor(clearColour);
+      renderer.setClearAlpha(originalClearAlpha);
+    };
+
+    this.composer.addPass(ao);
+
     const bloom = new UnrealBloomPass(
       new THREE.Vector2(window.innerWidth, window.innerHeight),
       0.3, // strength
@@ -137,6 +269,18 @@ export class GameRenderer {
     // Colour grade: lift saturation + gentle contrast (Valheim/Aska lean on this).
     const grade = new ShaderPass(GRADE_SHADER);
     this.composer.addPass(grade);
+
+    // Anti-aliasing. The renderer's own MSAA does nothing once EffectComposer is
+    // in play — passes render into their own targets, and the browser's MSAA
+    // only applies to the default framebuffer. So every edge in the game has
+    // been aliased this whole time: hard stair-steps on every trunk, and the
+    // alpha-cut grass and leaves crawl and shimmer as the camera moves. SMAA
+    // runs last, on the final image, and fixes both.
+    const smaa = new SMAAPass();
+    this.composer.addPass(smaa);
+
+    this.aoPass = ao;
+    this.smaaPass = smaa;
     this.bloomPass = bloom;
     this.vignettePass = vignette;
     this.gradePass = grade;
@@ -166,6 +310,8 @@ export class GameRenderer {
     this.vignettePass.enabled = q.postFX && q.vignette > 0.001;
     this.gradePass.uniforms['saturation']!.value = settings.saturation;
     this.gradePass.enabled = q.postFX;
+    this.aoPass.enabled = settings.ao;
+    this.smaaPass.enabled = settings.antialias;
 
     this.camera.fov = settings.fov;
     this.camera.updateProjectionMatrix();

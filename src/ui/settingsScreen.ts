@@ -347,6 +347,8 @@ export class SettingsScreen {
 
     this.group(pane, 'Post-processing');
     this.toggle(pane, 'Enable post-FX', () => settings.postFX, (v) => (settings.postFX = v), true);
+    this.toggle(pane, 'Ambient occlusion', () => settings.ao, (v) => (settings.ao = v), true);
+    this.toggle(pane, 'Anti-aliasing', () => settings.antialias, (v) => (settings.antialias = v), true);
     this.slider(pane, 'Bloom', () => settings.bloom, (v) => (settings.bloom = v), {
       min: 0, max: 1, step: 0.05, fmt: (v) => (v === 0 ? 'off' : v.toFixed(2)), custom: true,
     });

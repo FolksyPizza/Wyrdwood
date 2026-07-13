@@ -82,18 +82,21 @@ export class DayNight {
     const nightness = 1 - dayness;
     this.sky.copy(NIGHT_SKY).lerp(DAY_SKY, dayness).lerp(DUSK_SKY, duskness * 0.55);
 
+    // How far below the horizon the sun is: 0 by day, 1 in deep night.
+    const darknessKey = THREE.MathUtils.clamp(-elevation * 3, 0, 1);
+
     // Sun by day, moon by night, warm at the horizon.
-    this.sunColor.copy(DAY_SUN).lerp(DUSK_SUN, duskness).lerp(MOON, nightness * 0.85);
+    this.sunColor.copy(DAY_SUN).lerp(DUSK_SUN, duskness).lerp(MOON, darknessKey * 0.85);
     gfx.sun.color.copy(this.sunColor);
     // Moonlight is roughly 1/400,000 of sunlight in reality — but a game that
     // simulated that would just be black. This is the cinema convention: enough
     // cold key light to read shapes and cast soft shadows, dim enough that a
     // campfire still matters.
-    gfx.sun.intensity = 3.4 * dayness + 0.95 * nightness;
+    gfx.sun.intensity = 3.4 * dayness + 0.95 * darknessKey;
 
     // Ground-bounce fill. Small by day (the sky environment map does that work),
     // but it has to carry more of the load at night.
-    gfx.ambient.intensity = 0.06 + 0.1 * dayness + 0.55 * nightness;
+    gfx.ambient.intensity = 0.06 + 0.1 * dayness + 0.5 * darknessKey;
     gfx.ambient.color.copy(DAY_SKY).lerp(NIGHT_SKY, nightness).lerp(DUSK_SKY, duskness * 0.4);
     gfx.ambient.groundColor.setRGB(
       0.15 + dayness * 0.2,
@@ -102,12 +105,17 @@ export class DayNight {
     );
 
     // How strongly PBR materials pick up the sky.
-    gfx.scene.environmentIntensity = 0.14 + 0.42 * dayness + 0.3 * nightness;
+    gfx.scene.environmentIntensity = 0.14 + 0.42 * dayness + 0.25 * darknessKey;
 
-    // Exposure. AgX rolls highlights off instead of clipping, so this sits near
-    // 1.0 by day and holds both the sky and the shadowed grass. At night the
-    // camera opens up — the way your eyes do after a few minutes in the dark.
-    gfx.renderer.toneMappingExposure = 1.0 + nightness * 1.9 + duskness * 0.15;
+    // Exposure.
+    //
+    // `nightness` is 1 - dayness, and dayness ramps over elevation*3 — so it
+    // only reaches 1 once the sun is a third of the way up the sky. That means
+    // "nightness" is still 0.4 at mid-morning, and the night boost was being
+    // applied in broad daylight, blowing the morning and evening out. Exposure
+    // has to key off how far *below* the horizon the sun actually is, not off
+    // the inverse of a curve that was tuned for something else.
+    gfx.renderer.toneMappingExposure = 0.95 + darknessKey * 1.5 + duskness * 0.1;
   }
 
   get isNight(): boolean {
