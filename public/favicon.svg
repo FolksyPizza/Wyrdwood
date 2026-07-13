@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Wyrdwood: a conifer against a dusk sky, in the UI's iron/gold palette. -->
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a3550"/>
+      <stop offset="1" stop-color="#0e1119"/>
+    </linearGradient>
+    <linearGradient id="tree" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7fa860"/>
+      <stop offset="1" stop-color="#2f5233"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="13" fill="url(#sky)"/>
+  <circle cx="46" cy="17" r="6" fill="#e8c96a" opacity="0.9"/>
+  <path d="M32 6 L44 26 H36 L46 42 H18 L28 26 H20 Z" fill="url(#tree)"/>
+  <rect x="29.5" y="42" width="5" height="10" rx="1.5" fill="#5a4632"/>
+  <path d="M4 52 h56" stroke="#3b4a2c" stroke-width="6" stroke-linecap="round"/>
+</svg>

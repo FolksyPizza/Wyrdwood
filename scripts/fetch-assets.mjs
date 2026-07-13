@@ -52,11 +52,6 @@ const KIT = {
   'build/thatch': { asset: 'thatch_roof_angled', maps: { diff: 'Diffuse', nor: 'nor_gl', arm: 'arm' } },
   'build/stone': { asset: 'mossy_stone_wall', maps: { diff: 'Diffuse', nor: 'nor_gl', arm: 'arm' } },
 
-  // ── Character clothing ──────────────────────────────────────────────────
-  'cloth/shirt': { asset: 'fabric_pattern_07', maps: { diff: 'Diffuse', nor: 'nor_gl', arm: 'arm' } },
-  'cloth/pants': { asset: 'denim_fabric_03', maps: { diff: 'Diffuse', nor: 'nor_gl', arm: 'arm' } },
-  'cloth/leather': { asset: 'fabric_leather_02', maps: { diff: 'Diffuse', nor: 'nor_gl', arm: 'arm' } },
-
   // ── Foliage alpha atlases (harvested from photoscanned model texture sets) ──
   'foliage/pine_needles': {
     asset: 'pine_tree_01',
@@ -76,6 +71,24 @@ const KIT = {
   },
   'foliage/fern': {
     asset: 'fern_02',
+    maps: { diff: 'Diffuse', nor: 'nor_gl', alpha: 'Alpha' },
+  },
+  // Meadow flowers. Three species, because a field strewn with one identical
+  // bloom is the same wallpaper problem as a forest of one tree.
+  'foliage/gazania': {
+    asset: 'flower_gazania',
+    maps: { diff: 'Diffuse', nor: 'nor_gl', alpha: 'Alpha' },
+  },
+  'foliage/dandelion': {
+    asset: 'dandelion_01',
+    maps: { diff: 'Diffuse', nor: 'nor_gl', alpha: 'Alpha' },
+  },
+  'foliage/celandine': {
+    asset: 'celandine_01',
+    maps: { diff: 'Diffuse', nor: 'nor_gl', alpha: 'Alpha' },
+  },
+  'foliage/nettle': {
+    asset: 'nettle_plant',
     maps: { diff: 'Diffuse', nor: 'nor_gl', alpha: 'Alpha' },
   },
 };
