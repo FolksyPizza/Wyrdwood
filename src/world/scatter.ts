@@ -676,7 +676,9 @@ function makeGrassTuft(): THREE.BufferGeometry {
     // Taller than wide. The old card was 0.55 × 0.42, which is a doormat; real
     // meadow grass stands up, and the height is what fills the gaps between
     // tufts when you look across a field at a shallow angle.
-    const g = new THREE.PlaneGeometry(0.5, 0.62, 1, 3);
+    // Two height segments, not three. The wind bend only needs enough rows to
+    // curve; a third row cost 2 triangles per card across ~130k tufts.
+    const g = new THREE.PlaneGeometry(0.5, 0.62, 1, 2);
     g.translate(0, 0.31, 0);
     g.rotateY((i / N) * Math.PI);
     // Pick one of the atlas clumps for this card.
@@ -848,6 +850,11 @@ export function buildScatterMeshes(
     mesh.name = name;
     mesh.castShadow = castShadow;
     mesh.receiveShadow = true;
+    // Anything too small to cast a shadow is also too small to be worth a second
+    // full render into the ambient-occlusion depth buffer. That's every flower,
+    // fern, herb, mushroom, stick and pebble — hundreds of draw calls for an
+    // effect measured in single pixels.
+    if (!castShadow) mesh.userData['noAO'] = true;
     list.forEach((inst, i) => {
       P.set(inst.x, inst.y, inst.z);
       Q.setFromAxisAngle(Y_AXIS, inst.rotation);

@@ -394,11 +394,14 @@ export class ChunkManager {
     if (gd <= 0) return null; // low preset: no grass carpet at all
     const x0 = cx * CHUNK_SIZE;
     const z0 = cz * CHUNK_SIZE;
-    // Real grassland has no visible gaps. At 0.7 m spacing you could see the dirt
-    // between every tuft, which is what made it read as sparse scrub. Each tuft
-    // card is ~0.55 m wide, so they have to be planted closer than that to
-    // overlap into a continuous carpet.
-    const STEP = 0.34;
+    // Spacing. Each tuft card is ~0.5 m wide, so they must be planted closer than
+    // that to overlap into a continuous carpet — at 0.7 m you could see dirt
+    // between every one.
+    //
+    // 0.34 m gave ~3.4M triangles of grass, which was over half the frame. Now
+    // that the ground *under* the grass is green rather than brown, a gap no
+    // longer reads as bare soil, so the carpet can be thinner without opening up.
+    const STEP = 0.4;
     const per = Math.floor(CHUNK_SIZE / STEP);
     const placements: {
       x: number;
@@ -481,6 +484,9 @@ export class ChunkManager {
     mesh.receiveShadow = true;
     mesh.castShadow = false;
     mesh.frustumCulled = true;
+    // Skip the ambient-occlusion depth pass (see renderer.ts) — grass is by far
+    // the heaviest geometry in the scene and gains almost nothing from it.
+    mesh.userData['noAO'] = true;
     const m = new THREE.Matrix4();
     const p = new THREE.Vector3();
     const q = new THREE.Quaternion();

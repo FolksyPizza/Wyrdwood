@@ -204,6 +204,7 @@ export class GameRenderer {
     // Replace GTAO's shared-override depth/normal render with a per-material one
     // that respects alpha cutouts (see cutoutNormalMaterial above).
     const swapped: { mesh: THREE.Mesh; mat: THREE.Material | THREE.Material[] }[] = [];
+    const hidden: THREE.Mesh[] = [];
     const clearColour = new THREE.Color();
     type OverrideFn = (
       renderer: THREE.WebGLRenderer,
@@ -232,9 +233,25 @@ export class GameRenderer {
       }
 
       swapped.length = 0;
+      hidden.length = 0;
       this.scene.traverse((o) => {
         const mesh = o as THREE.Mesh;
         if (!mesh.isMesh || !mesh.material) return;
+
+        // Grass is ~3.4M triangles. Rendering it a SECOND time to build the AO
+        // depth buffer roughly doubles the frame's geometry cost, and buys very
+        // little: a blade of grass occluding another blade of grass is a subtlety
+        // nobody sees, while the AO that actually matters — under trees, in rock
+        // creases, where a trunk meets the ground — comes from the solid geometry.
+        // So the dense foliage sits this pass out.
+        if (mesh.userData['noAO'] === true) {
+          if (mesh.visible) {
+            hidden.push(mesh);
+            mesh.visible = false;
+          }
+          return;
+        }
+
         swapped.push({ mesh, mat: mesh.material });
         mesh.material = Array.isArray(mesh.material)
           ? mesh.material.map(cutoutNormalMaterial)
@@ -242,6 +259,7 @@ export class GameRenderer {
       });
       renderer.render(this.scene, this.camera);
       for (const s of swapped) s.mesh.material = s.mat;
+      for (const m of hidden) m.visible = true;
 
       renderer.autoClear = originalAutoClear;
       renderer.setClearColor(clearColour);

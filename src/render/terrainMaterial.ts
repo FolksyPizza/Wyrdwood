@@ -152,31 +152,40 @@ export function makeTerrainMaterial(): THREE.MeshStandardMaterial {
           vec2 nUv = vMapUv * uScale.w;
 
           vec3 wn = normalize(vWNor);
-          // Rock is triplanar; everything else keeps the cheap planar projection,
-          // because grass/sand/snow only ever sit on ground you can stand on.
-          vec3 rockAlbedo = triplanar(uRockMap, vWPos, wn, uScale.y);
-          vec3 rockNor    = triplanar(uRockNor, vWPos, wn, uScale.y);
-          vec3 rockArm    = triplanar(uRockArm, vWPos, wn, uScale.y);
 
-          vec3 albedo =
-              detile(uGrassMap, gUv) * w.x
-            + rockAlbedo             * w.y
-            + detile(uSandMap,  sUv) * w.z
-            + detile(uSnowMap,  nUv) * w.w;
+          // Only sample a layer that is actually visible here.
+          //
+          // Fully evaluating all four layers cost ~28 texture fetches per pixel
+          // (de-tiling doubles each one, and the triplanar rock triples it again)
+          // — and on a meadow, three of those four layers have a weight of zero.
+          // The branches are coherent across large screen regions (a whole
+          // hillside is grass, a whole cliff is rock), which is exactly the case
+          // where GPU branching pays.
+          vec3 albedo = vec3(0.0);
+          splatNor = vec3(0.0);
+          splatArm = vec3(0.0);
 
-          // Normals are de-tiled with the SAME mask as the albedo, or the lighting
-          // would disagree with the colour about where each rock is.
-          splatNor =
-              detile(uGrassNor, gUv) * w.x
-            + rockNor                * w.y
-            + detile(uSandNor,  sUv) * w.z
-            + detile(uSnowNor,  nUv) * w.w;
-
-          splatArm =
-              texture2D(uGrassArm, gUv).rgb * w.x
-            + rockArm                       * w.y
-            + texture2D(uSandArm,  sUv).rgb * w.z
-            + texture2D(uSnowArm,  nUv).rgb * w.w;
+          if (w.x > 0.004) {
+            albedo   += detile(uGrassMap, gUv) * w.x;
+            splatNor += detile(uGrassNor, gUv) * w.x;
+            splatArm += texture2D(uGrassArm, gUv).rgb * w.x;
+          }
+          if (w.y > 0.004) {
+            // Rock is triplanar: the terrain's top-down UVs smear on a cliff face.
+            albedo   += triplanar(uRockMap, vWPos, wn, uScale.y) * w.y;
+            splatNor += triplanar(uRockNor, vWPos, wn, uScale.y) * w.y;
+            splatArm += triplanar(uRockArm, vWPos, wn, uScale.y) * w.y;
+          }
+          if (w.z > 0.004) {
+            albedo   += detile(uSandMap, sUv) * w.z;
+            splatNor += detile(uSandNor, sUv) * w.z;
+            splatArm += texture2D(uSandArm, sUv).rgb * w.z;
+          }
+          if (w.w > 0.004) {
+            albedo   += detile(uSnowMap, nUv) * w.w;
+            splatNor += detile(uSnowNor, nUv) * w.w;
+            splatArm += texture2D(uSnowArm, nUv).rgb * w.w;
+          }
 
           // A 1k texture tiling every few metres is obvious from a distance, so
           // break it up with a slow large-scale brightness wave. Cheaper than a

@@ -22,7 +22,8 @@
     "appId": "com.wyrdwood.game",
     "productName": "Wyrdwood",
     "directories": {
-      "output": "release"
+      "output": "release",
+      "buildResources": "build"
     },
     "files": [
       "dist/**/*",
@@ -30,15 +31,19 @@
     ],
     "mac": {
       "target": "dmg",
-      "category": "public.app-category.games"
+      "category": "public.app-category.games",
+      "icon": "build/icon.png"
     },
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "build/icon.png"
     },
     "linux": {
       "target": "AppImage",
-      "category": "Game"
-    }
+      "category": "Game",
+      "icon": "build/icon.png"
+    },
+    "icon": "build/icon.png"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.19.3",

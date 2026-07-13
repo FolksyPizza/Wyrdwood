@@ -14,6 +14,10 @@ function createWindow() {
     minHeight: 600,
     backgroundColor: '#0b0e12',
     title: 'Wyrdwood',
+    // Shown in the taskbar/dock while running. The *packaged* app's icon comes
+    // from electron-builder's `build.icon` (see package.json) — this one only
+    // covers the dev/unpackaged case, where there's no bundle to read it from.
+    icon: path.join(__dirname, '..', 'build', 'icon.png'),
     show: false,
     webPreferences: {
       contextIsolation: true,
