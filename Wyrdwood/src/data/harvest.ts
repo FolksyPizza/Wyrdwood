@@ -22,6 +22,8 @@ export interface HarvestDef {
 export type HarvestType =
   | 'tree'
   | 'pine'
+  | 'dandelion'
+  | 'daisy'
   | 'rock'
   | 'bush'
   | 'flower'
@@ -65,6 +67,8 @@ export const HARVEST: Record<HarvestType, HarvestDef> = {
   mushroom: { hits: 1, drops: [{ itemId: 'mushroom', count: 2 }], verb: 'Gather' },
   herb: { hits: 1, drops: [{ itemId: 'herb', count: 2 }], verb: 'Gather' },
   fern: { hits: 1, drops: [{ itemId: 'herb', count: 1 }], verb: 'Gather' },
+  dandelion: { hits: 1, drops: [{ itemId: 'herb', count: 1 }], verb: 'Pick' },
+  daisy: { hits: 1, drops: [{ itemId: 'herb', count: 1 }], verb: 'Pick' },
 
   // Ground clutter: free, instant, no tool. This is the bootstrap — you need
   // wood and stone to make the axe and pick that let you take wood and stone

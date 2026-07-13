@@ -8,6 +8,8 @@ import { applyARM, loadPBR, makeLeafCluster } from '../render/assets';
 export type ScatterType =
   | 'tree'
   | 'pine'
+  | 'dandelion'
+  | 'daisy'
   | 'rock'
   | 'bush'
   | 'flower'
@@ -79,7 +81,12 @@ export function scatterForChunk(
       }
       else if (roll < (acc += biome.rockDensity)) type = 'rock';
       else if (roll < (acc += biome.bushDensity)) type = 'bush';
-      else if (roll < (acc += biome.flowerDensity)) type = 'flower';
+      else if (roll < (acc += biome.flowerDensity)) {
+        // Three flower species, not one. A meadow strewn with a single identical
+        // orange bloom is the same wallpaper problem as a forest of one tree.
+        const pick = cellHash(terrain.seed, cellX, cellZ, 7);
+        type = pick < 0.4 ? 'flower' : pick < 0.75 ? 'dandelion' : 'daisy';
+      }
       else if (roll < (acc += biome.mushroomDensity)) type = 'mushroom';
       else if (roll < (acc += biome.herbDensity)) type = 'herb';
       else if (roll < (acc += biome.fernDensity)) type = 'fern';
@@ -155,6 +162,18 @@ export class ScatterAssets {
     makeLeafCluster('foliage/gazania', FLOWER_RECTS, { leaves: 9, seed: 0x0f10, size: 384 }),
     0.34,
   );
+  // Dandelions (yellow) and celandines — the meadow's other two flowers.
+  readonly dandelionGeo = makePlantCards(DANDELION_RECTS, 0.3, 0.32, 3);
+  readonly dandelionMat = makePlantMaterial(
+    makeLeafCluster('foliage/dandelion', DANDELION_RECTS, { leaves: 8, seed: 0xda1d, size: 384 }),
+    0.32,
+  );
+  readonly daisyGeo = makePlantCards(DAISY_RECTS, 0.26, 0.26, 3);
+  readonly daisyMat = makePlantMaterial(
+    makeLeafCluster('foliage/celandine', DAISY_RECTS, { leaves: 10, seed: 0xce1a, size: 384 }),
+    0.26,
+  );
+
   readonly fernGeo = makePlantCards(FERN_RECTS, 0.5, 0.75, 3);
   readonly fernMat = makePlantMaterial(
     loadPBR('foliage/fern', { alpha: true, arm: false }).map,
@@ -595,6 +614,22 @@ const SHRUB_RECTS = [
   { u: 0.02, v: 0.06, w: 0.19, h: 0.28 }, // autumn yellow
 ];
 
+/** Dandelion: two open yellow blooms and its serrated leaves. */
+const DANDELION_RECTS = [
+  { u: 0.58, v: 0.755, w: 0.19, h: 0.22 }, // bloom
+  { u: 0.82, v: 0.76, w: 0.17, h: 0.21 }, // bloom
+  { u: 0.03, v: 0.32, w: 0.14, h: 0.42 }, // leaf
+  { u: 0.31, v: 0.06, w: 0.32, h: 0.28 }, // leaf
+];
+
+/** Celandine — the atlas is a plant on black, so a coarse split is enough. */
+const DAISY_RECTS = [
+  { u: 0.05, v: 0.5, w: 0.4, h: 0.45 },
+  { u: 0.52, v: 0.5, w: 0.4, h: 0.45 },
+  { u: 0.05, v: 0.05, w: 0.4, h: 0.4 },
+  { u: 0.52, v: 0.05, w: 0.4, h: 0.4 },
+];
+
 /** Gazania: two open flower heads plus its lobed leaves. */
 const FLOWER_RECTS = [
   { u: 0.02, v: 0.023, w: 0.3, h: 0.318 }, // big bloom
@@ -614,7 +649,29 @@ const FLOWER_RECTS = [
  */
 function makeGrassTuft(): THREE.BufferGeometry {
   const geos: THREE.BufferGeometry[] = [];
-  const N = 3; // three cards at 60° — reads as volume from any angle
+
+  // A skirt of low, wide cards around the base of the clump.
+  //
+  // Tall tufts alone leave the ground showing between them, and no amount of
+  // extra tufts closes that up — you just get taller gaps. Real turf is grass
+  // all the way down: a dense low mat with taller clumps standing out of it.
+  // These cost 3 quads per tuft (no extra draw call, they merge into the same
+  // geometry) and they are what stops the field reading as plants sitting on
+  // dirt.
+  for (let i = 0; i < 4; i++) {
+    const g = new THREE.PlaneGeometry(0.85, 0.26, 1, 1);
+    g.translate(0, 0.12, 0);
+    g.rotateX(-0.75); // lie it over, almost flat against the ground
+    g.rotateY((i / 4) * Math.PI * 2 + 0.4);
+    const card = GRASS_CARDS[(i + 2) % GRASS_CARDS.length]!;
+    const uv = g.getAttribute('uv') as THREE.BufferAttribute;
+    for (let v = 0; v < uv.count; v++) {
+      uv.setXY(v, card.u + uv.getX(v) * card.w, card.v + uv.getY(v) * card.h * 0.45);
+    }
+    geos.push(g);
+  }
+
+  const N = 3; // three tall cards at 60° — reads as volume from any angle
   for (let i = 0; i < N; i++) {
     // Taller than wide. The old card was 0.55 × 0.42, which is a doormat; real
     // meadow grass stands up, and the height is what fills the gaps between
@@ -770,6 +827,8 @@ export function buildScatterMeshes(
   const mushrooms = instances.filter((i) => i.type === 'mushroom');
   const herbs = instances.filter((i) => i.type === 'herb');
   const ferns = instances.filter((i) => i.type === 'fern');
+  const dandelions = instances.filter((i) => i.type === 'dandelion');
+  const daisies = instances.filter((i) => i.type === 'daisy');
   const sticks = instances.filter((i) => i.type === 'stick');
   const pebbles = instances.filter((i) => i.type === 'pebble');
   const logs = instances.filter((i) => i.type === 'log');
@@ -833,6 +892,8 @@ export function buildScatterMeshes(
   make(assets.berryGeo, assets.berryMat, bushes, 'berries', false);
   // Small plants — no shadow casting (cheap, and they'd shadow-flicker).
   make(assets.flowerGeo, assets.flowerMat, flowers, 'flowers', false);
+  make(assets.dandelionGeo, assets.dandelionMat, dandelions, 'dandelions', false);
+  make(assets.daisyGeo, assets.daisyMat, daisies, 'daisies', false);
   make(assets.fernGeo, assets.fernMat, ferns, 'ferns', false);
   make(assets.herbGeo, assets.herbMat, herbs, 'herbs', false);
   make(assets.mushStemGeo, assets.mushStemMat, mushrooms, 'mushStems', false);

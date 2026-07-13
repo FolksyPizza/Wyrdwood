@@ -410,16 +410,21 @@ export class ChunkManager {
       h: number;
       r: number;
       tint: number;
+      /** Soil moisture here, 0–1 — drives the green/straw balance. */
+      wet: number;
     }[] = [];
     for (let gx = 0; gx < per; gx++) {
       for (let gz = 0; gz < per; gz++) {
         const cellX = Math.floor(x0 / STEP) + gx;
         const cellZ = Math.floor(z0 / STEP) + gz;
         const density = cellHash(this.terrain.seed, cellX, cellZ, 10);
+        // Jitter beyond the cell (±0.9 of a step, not ±0.5). A tuft confined to
+        // its own cell still leaves the lattice faintly visible; letting them
+        // cross into each other's cells scatters the placement properly.
         const jx = cellHash(this.terrain.seed, cellX, cellZ, 11);
         const jz = cellHash(this.terrain.seed, cellX, cellZ, 12);
-        const x = x0 + gx * STEP + jx * STEP;
-        const z = z0 + gz * STEP + jz * STEP;
+        const x = x0 + gx * STEP + (jx - 0.5) * STEP * 1.8;
+        const z = z0 + gz * STEP + (jz - 0.5) * STEP * 1.8;
         const y = this.terrain.height(x, z);
         if (y < SEA_LEVEL + 0.6) continue;
         if (this.terrain.slopeAt(x, z) > 0.7) continue;
@@ -435,8 +440,21 @@ export class ChunkManager {
         // hashes: a per-tuft roll, plus a slow spatial wave so that tall and
         // short grass fall into *patches* rather than salt-and-pepper noise.
         const roll = cellHash(this.terrain.seed, cellX, cellZ, 13);
-        const patch = 0.5 + 0.5 * Math.sin(x * 0.045 + Math.cos(z * 0.037) * 2.1);
-        const height = g.minH + (g.maxH - g.minH) * (roll * 0.55 + patch * 0.45);
+        // Patchiness. A single sine here produced visible periodic BANDS of
+        // short grass marching across the field — stripes, not patches. Summing
+        // three waves whose frequencies share no common period breaks the
+        // repeat, and moisture ties the patches to the terrain rather than
+        // floating over it.
+        const patch = clamp(
+          0.5 +
+            0.28 * Math.sin(x * 0.041 + 1.7) * Math.cos(z * 0.033 - 0.6) +
+            0.16 * Math.sin((x + z) * 0.017 + 2.3) +
+            0.1 * Math.cos(x * 0.011 - z * 0.014),
+          0,
+          1,
+        );
+        const wet = this.terrain.moistureAt(x, z);
+        const height = g.minH + (g.maxH - g.minH) * (roll * 0.4 + patch * 0.3 + wet * 0.3);
 
         placements.push({
           x,
@@ -446,6 +464,11 @@ export class ChunkManager {
           h: height, // height, independently of width
           r: cellHash(this.terrain.seed, cellX, cellZ, 14) * Math.PI,
           tint: cellHash(this.terrain.seed, cellX, cellZ, 15),
+          // Grass follows the water. A field runs deep green where the ground is
+          // damp and bleaches to straw where it is not, and that variation across
+          // a hillside is a large part of why a real meadow doesn't read as a
+          // single flat colour.
+          wet,
         });
       }
     }
@@ -471,9 +494,14 @@ export class ChunkManager {
       s.set(g.s, g.h, g.s);
       mesh.setMatrixAt(i, m.compose(p, q, s));
       // The card already carries a photograph of real grass, so this is only a
-      // gentle per-tuft shade/hue jitter over it — a saturated tint here would
-      // stain the photo and undo the point of using it.
-      col.setRGB(0.82 + g.tint * 0.3, 0.88 + g.tint * 0.2, 0.78 + g.tint * 0.22);
+      // gentle shade/hue nudge over it — a saturated tint would stain the photo
+      // and undo the point of using it. Damp ground pulls green, dry pulls straw.
+      const lush = 0.35 + g.wet * 0.65;
+      col.setRGB(
+        (1.02 - lush * 0.24) * (0.9 + g.tint * 0.18), // dry = warmer red
+        (0.86 + lush * 0.16) * (0.92 + g.tint * 0.14),
+        (0.7 + lush * 0.16) * (0.9 + g.tint * 0.16),
+      );
       mesh.setColorAt(i, col);
     });
     mesh.instanceMatrix.needsUpdate = true;

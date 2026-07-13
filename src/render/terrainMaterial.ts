@@ -200,6 +200,16 @@ export function makeTerrainMaterial(): THREE.MeshStandardMaterial {
           rockTint = mix(rockTint, vec3(0.74, 0.86, 0.66), lichen * 0.3);
 
           albedo = mix(albedo, albedo * rockTint, w.y);
+
+          // The ground layer is a scan of leaf-littered turf, which is largely
+          // BROWN. Under a grass field that is exactly wrong: every gap between
+          // tufts then reads as bare dirt, and no amount of extra grass closes
+          // it — you are looking at the soil the grass is standing on. Pushing
+          // the grass layer green means a gap reads as more grass, which is what
+          // a gap in a real field looks like.
+          vec3 turf = vec3(0.72, 1.06, 0.62);
+          albedo = mix(albedo, albedo * turf, w.x * 0.75);
+
           diffuseColor.rgb *= albedo * macro;
           `,
         )
