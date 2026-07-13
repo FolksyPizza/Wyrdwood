@@ -4,7 +4,9 @@ import type { Terrain } from '../world/terrain';
 import { settings } from '../data/settings';
 
 const BASE_SENSITIVITY = 0.0022;
-const DISTANCE = 5.5;
+/** Third-person camera distance limits, in metres. */
+const MIN_DISTANCE = 1.6; // close over the shoulder
+const MAX_DISTANCE = 12;
 const HEAD_HEIGHT = 1.55;
 /** Sprinting widens the lens by this much, on top of the player's FOV setting. */
 const SPRINT_FOV_KICK = 6;
@@ -18,6 +20,9 @@ const SPRINT_FOV_KICK = 6;
 export class ThirdPersonCamera {
   yaw = 0;
   pitch = 0.35;
+  /** How far back the camera sits — scroll to change. */
+  distance = 5.5;
+  private targetDistance = 5.5;
   /** Movement basis — the direction W means. Frozen during free-look. */
   moveYaw = 0;
 
@@ -42,6 +47,18 @@ export class ThirdPersonCamera {
     sprinting = false,
     freeLook = false,
   ): void {
+    // Zoom. Eased rather than snapped, so a scroll flick glides instead of
+    // teleporting the camera.
+    const notches = input.consumeWheel();
+    if (notches !== 0) {
+      this.targetDistance = THREE.MathUtils.clamp(
+        this.targetDistance * (1 + notches * 0.12),
+        MIN_DISTANCE,
+        MAX_DISTANCE,
+      );
+    }
+    this.distance += (this.targetDistance - this.distance) * Math.min(1, frameDt * 12);
+
     const { dx, dy } = input.consumeMouseDelta();
     const s = BASE_SENSITIVITY * settings.mouseSensitivity;
     this.yaw -= dx * s;
@@ -54,9 +71,9 @@ export class ThirdPersonCamera {
 
     const cp = Math.cos(this.pitch);
     this.desired.set(
-      this.target.x + Math.sin(this.yaw) * cp * DISTANCE,
-      this.target.y + Math.sin(this.pitch) * DISTANCE,
-      this.target.z + Math.cos(this.yaw) * cp * DISTANCE,
+      this.target.x + Math.sin(this.yaw) * cp * this.distance,
+      this.target.y + Math.sin(this.pitch) * this.distance,
+      this.target.z + Math.cos(this.yaw) * cp * this.distance,
     );
 
     // Keep the camera above the ground.

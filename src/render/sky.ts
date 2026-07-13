@@ -23,10 +23,10 @@ import type { GameRenderer } from './renderer';
  * a handful of pixels, while the sun's actual light comes from the directional
  * light, not from IBL.
  */
-function clampSkyRadiance(mat: THREE.ShaderMaterial): void {
+function clampSkyRadiance(mat: THREE.ShaderMaterial, ceiling: number): void {
   mat.fragmentShader = mat.fragmentShader.replace(
     'gl_FragColor = vec4( texColor, 1.0 );',
-    'gl_FragColor = vec4( min( texColor, vec3( 40.0 ) ), 1.0 );',
+    `gl_FragColor = vec4( min( texColor, vec3( ${ceiling.toFixed(1)} ) ), 1.0 );`,
   );
   mat.needsUpdate = true;
 }
@@ -71,10 +71,20 @@ export class SkyDome {
     u['cloudCoverage']!.value = 0.45;
     u['cloudDensity']!.value = 0.55;
     u['cloudElevation']!.value = 0.42;
+    // Clamp the *visible* sky too, not just the copy we bake for lighting.
+    //
+    // The Sky shader is physically honest: around the sun disc its radiance runs
+    // to five figures. No tone mapper survives that — AgX rolls the highlights
+    // off, but it still has to map 40,000 onto the screen, and everything near it
+    // goes to white. That is what makes looking anywhere near the sun blinding,
+    // and it is why pulling the exposure down to compensate crushed the land into
+    // silhouette. Capping the sky's output keeps a bright, hot sun without
+    // handing the tone mapper a number it cannot do anything sensible with.
+    clampSkyRadiance(this.sky.material as THREE.ShaderMaterial, 12);
     scene.add(this.sky);
 
     this.envSky.scale.setScalar(100);
-    clampSkyRadiance(this.envSky.material as THREE.ShaderMaterial);
+    clampSkyRadiance(this.envSky.material as THREE.ShaderMaterial, 40);
     this.envScene.add(this.envSky);
     const rng = mulberry32(0x57a125);
     const count = 700;

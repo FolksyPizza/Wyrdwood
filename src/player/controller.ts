@@ -27,6 +27,16 @@ export class PlayerController {
   /** Position at the step before that — the other end of the interpolation. */
   private prevPosition = new THREE.Vector3();
   /**
+   * The grade the player is walking on: rise over run, along the direction of
+   * travel. Positive uphill, negative downhill, ~1.0 is a 45° slope.
+   *
+   * Taken from how the body *actually* moved last step rather than from the
+   * terrain normal, so it accounts for the character controller sliding, being
+   * stopped by a wall, or auto-stepping — the animation then matches what the
+   * body did, not what the ground under it looks like.
+   */
+  grade = 0;
+  /**
    * Where the player is *drawn* this frame: `prevPosition` and `position` blended
    * by the loop's alpha.
    *
@@ -91,7 +101,11 @@ export class PlayerController {
     }
     const hasInput = mx !== 0 || mz !== 0;
     this.running = hasInput && input.action('sprint') && stats.canRun;
-    const speed = this.running ? RUN_SPEED : WALK_SPEED;
+    // Climbing is slow. A 45° slope costs about a third of your pace; downhill
+    // gives a little of it back, but not proportionally — you can't sprint down
+    // a mountain any faster than you can across a field.
+    const gradeCost = this.grade > 0 ? 1 / (1 + this.grade * 0.7) : 1 + Math.min(0.15, -this.grade * 0.15);
+    const speed = (this.running ? RUN_SPEED : WALK_SPEED) * gradeCost;
 
     // Target horizontal velocity from camera-relative input. W is ALWAYS
     // "away from the camera" (into the screen) regardless of body facing.
@@ -152,6 +166,15 @@ export class PlayerController {
       t.z + corrected.z,
     );
     this.speed = Math.hypot(corrected.x, corrected.z) / dt;
+
+    // Grade, smoothed — a raw per-step value is far too jittery to drive a pose.
+    const run = Math.hypot(corrected.x, corrected.z);
+    if (this.grounded && run > 1e-4) {
+      const raw = THREE.MathUtils.clamp(corrected.y / run, -1.5, 1.5);
+      this.grade += (raw - this.grade) * Math.min(1, dt * 6);
+    } else {
+      this.grade += (0 - this.grade) * Math.min(1, dt * 4);
+    }
   }
 
   /** Teleport (respawn). */
@@ -178,6 +201,6 @@ export class PlayerController {
     let d = this.facing - this.humanoid.group.rotation.y;
     d = Math.atan2(Math.sin(d), Math.cos(d)); // wrap to [-π, π]
     this.humanoid.group.rotation.y += d * Math.min(frameDt * 12, 1);
-    this.humanoid.animate(frameDt, this.speed, this.grounded);
+    this.humanoid.animate(frameDt, this.speed, this.grounded, this.grade);
   }
 }

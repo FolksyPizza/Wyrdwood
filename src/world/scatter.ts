@@ -5,7 +5,20 @@ import { SEA_LEVEL, type Terrain } from './terrain';
 import { worldClock } from '../render/textures';
 import { applyARM, loadPBR, makeLeafCluster } from '../render/assets';
 
-export type ScatterType = 'tree' | 'rock' | 'bush' | 'flower' | 'mushroom' | 'herb' | 'fern';
+export type ScatterType =
+  | 'tree'
+  | 'rock'
+  | 'bush'
+  | 'flower'
+  | 'mushroom'
+  | 'herb'
+  | 'fern'
+  // Ground clutter. These are what you pick up bare-handed before you have any
+  // tools at all — a forest floor is covered in usable material, and a world
+  // where the only wood is a standing tree you can't chop yet is a dead end.
+  | 'stick'
+  | 'pebble'
+  | 'log';
 
 /** A scattered world object — serializable identity for harvesting. */
 export interface ScatterInstance {
@@ -57,6 +70,9 @@ export function scatterForChunk(
       else if (roll < (acc += biome.mushroomDensity)) type = 'mushroom';
       else if (roll < (acc += biome.herbDensity)) type = 'herb';
       else if (roll < (acc += biome.fernDensity)) type = 'fern';
+      else if (roll < (acc += biome.stickDensity)) type = 'stick';
+      else if (roll < (acc += biome.pebbleDensity)) type = 'pebble';
+      else if (roll < (acc += biome.logDensity)) type = 'log';
       if (!type) continue;
 
       const isPlant =
@@ -87,6 +103,13 @@ export class ScatterAssets {
   readonly foliage3Geo = makeCanopy(0.95, 1.5, 8, 2.6); // crown
   readonly rockGeo = makeRock();
   readonly bushGeo = makeCanopy(0.8, 0.9, 9, 0.0);
+  /** Berries, nestled *inside* the bush's leaf shell rather than sitting on it. */
+  readonly berryGeo = makeBerries(0.8, 0.9, 22);
+  readonly berryMat = new THREE.MeshStandardMaterial({
+    color: 0xa3172b,
+    roughness: 0.35, // fruit is waxy — it catches a small highlight, unlike leaves
+    metalness: 0,
+  });
 
   readonly trunkMat = makeBarkMaterial();
   readonly foliageMat = makeLeafMaterial();
@@ -118,6 +141,13 @@ export class ScatterAssets {
     loadPBR('foliage/nettle', { alpha: true, arm: false }).alphaMap,
   );
 
+  // ── Ground clutter ───────────────────────────────────────────────────────
+  readonly stickGeo = makeStick();
+  readonly pebbleGeo = makePebbles();
+  readonly logGeo = makeLog();
+  readonly woodMat = makeBarkMaterial();
+  readonly stoneMat = makeRockMaterial();
+
   // Mushrooms: pale stem + red spotted cap.
   readonly mushStemGeo = new THREE.CylinderGeometry(0.05, 0.07, 0.24, 6);
   readonly mushCapGeo = new THREE.SphereGeometry(0.16, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2);
@@ -137,6 +167,10 @@ export class ScatterAssets {
     this.foliage3Geo.translate(0, 2.7, 0);
     this.bushGeo.scale(1, 0.8, 1);
     this.bushGeo.translate(0, 0.15, 0);
+    // The berries must take the same squash and lift as the leaf shell they sit
+    // inside, or the fruit ends up hanging in the air beside the bush.
+    this.berryGeo.scale(1, 0.8, 1);
+    this.berryGeo.translate(0, 0.15, 0);
     // Plant cards already pivot at ground level (makePlantCards translates them).
     this.mushStemGeo.translate(0, 0.12, 0);
     this.mushCapGeo.translate(0, 0.24, 0);
@@ -186,6 +220,92 @@ function makeCanopy(radius: number, height: number, cards: number, yOffset: numb
     geos.push(q);
   }
   return mergeGeometries(geos);
+}
+
+/**
+ * Berries for a bush: little spheres scattered through the volume the leaf cards
+ * occupy — *inside* the shell, at a slightly smaller radius, so they peek out
+ * from between the leaves the way real fruit does. Merged into one geometry so a
+ * whole chunk's berries cost a single instanced draw.
+ */
+function makeBerries(radius: number, height: number, count: number): THREE.BufferGeometry {
+  const geos: THREE.BufferGeometry[] = [];
+  const rng = mulberry32(0xb3221);
+  const bead = new THREE.SphereGeometry(0.035, 6, 5);
+  for (let i = 0; i < count; i++) {
+    // Berries grow in little clusters, not evenly — pick a few anchor points and
+    // hang two or three berries off each.
+    const t = (i + 0.5) / count;
+    const phi = Math.acos(1 - 1.6 * t);
+    const theta = i * 2.399 + rng() * 0.8;
+    // 0.78 of the leaf radius: deep enough to be *in* the foliage, shallow
+    // enough to be seen through it.
+    const r = radius * 0.78 * (0.85 + rng() * 0.25);
+
+    const g = bead.clone();
+    g.translate(
+      Math.sin(phi) * Math.cos(theta) * r + (rng() - 0.5) * 0.06,
+      Math.cos(phi) * height * 0.42 + height * 0.16 + (rng() - 0.5) * 0.06,
+      Math.sin(phi) * Math.sin(theta) * r + (rng() - 0.5) * 0.06,
+    );
+    geos.push(g);
+  }
+  bead.dispose();
+  return mergeGeometries(geos);
+}
+
+/** A fallen branch: a slightly bent twig lying flat on the ground. */
+function makeStick(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  const main = new THREE.CylinderGeometry(0.022, 0.032, 0.85, 5);
+  main.rotateZ(Math.PI / 2); // lay it down
+  main.rotateY(0.2);
+  main.translate(0, 0.03, 0);
+  parts.push(main);
+  // A side twig, so it isn't a perfect dowel.
+  const twig = new THREE.CylinderGeometry(0.012, 0.018, 0.3, 4);
+  twig.rotateZ(Math.PI / 2.3);
+  twig.rotateY(-0.9);
+  twig.translate(0.18, 0.04, 0.1);
+  parts.push(twig);
+  return mergeGeometries(parts);
+}
+
+/** A small scatter of loose stones — several, because one lone pebble reads as
+ * a dropped prop rather than as ground. */
+function makePebbles(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  const rng = mulberry32(0x9eb1);
+  for (let i = 0; i < 4; i++) {
+    const r = 0.06 + rng() * 0.07;
+    const g = new THREE.DodecahedronGeometry(r, 0);
+    g.scale(1, 0.6 + rng() * 0.3, 1);
+    const a = rng() * Math.PI * 2;
+    const d = rng() * 0.2;
+    g.rotateY(rng() * Math.PI);
+    g.translate(Math.cos(a) * d, r * 0.5, Math.sin(a) * d);
+    parts.push(g);
+  }
+  return mergeGeometries(parts);
+}
+
+/** A fallen log: a thick trunk lying on its side, with a broken-off stub. */
+function makeLog(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  const trunk = new THREE.CylinderGeometry(0.19, 0.24, 2.6, 9);
+  // Real bark UVs — the log is big enough to read the texture on.
+  const uv = trunk.getAttribute('uv') as THREE.BufferAttribute;
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * 1.4, uv.getY(i) * 0.9);
+  trunk.rotateZ(Math.PI / 2);
+  trunk.rotateY(0.35);
+  trunk.translate(0, 0.22, 0);
+  parts.push(trunk);
+  const stub = new THREE.CylinderGeometry(0.06, 0.09, 0.5, 6);
+  stub.rotateZ(0.7);
+  stub.rotateY(1.2);
+  stub.translate(0.55, 0.4, 0.15);
+  parts.push(stub);
+  return mergeGeometries(parts);
 }
 
 /** Lumpy boulder: an icosphere pushed around by noise, so no two rocks match. */
@@ -555,6 +675,9 @@ export function buildScatterMeshes(
   const mushrooms = instances.filter((i) => i.type === 'mushroom');
   const herbs = instances.filter((i) => i.type === 'herb');
   const ferns = instances.filter((i) => i.type === 'fern');
+  const sticks = instances.filter((i) => i.type === 'stick');
+  const pebbles = instances.filter((i) => i.type === 'pebble');
+  const logs = instances.filter((i) => i.type === 'log');
 
   const meshes: THREE.InstancedMesh[] = [];
   const make = (
@@ -607,11 +730,19 @@ export function buildScatterMeshes(
   make(assets.foliage3Geo, assets.foliageMat, trees, 'foliage3', true, 1);
   make(assets.rockGeo, assets.rockMat, rocks, 'rocks', true, 0.3);
   make(assets.bushGeo, assets.bushMat, bushes, 'bushes', false, 1);
+  // Fruit. Not tinted: a berry bush should read as a berry bush at a glance, and
+  // hue-jittering the berries along with the leaves would grey them out.
+  make(assets.berryGeo, assets.berryMat, bushes, 'berries', false);
   // Small plants — no shadow casting (cheap, and they'd shadow-flicker).
   make(assets.flowerGeo, assets.flowerMat, flowers, 'flowers', false);
   make(assets.fernGeo, assets.fernMat, ferns, 'ferns', false);
   make(assets.herbGeo, assets.herbMat, herbs, 'herbs', false);
   make(assets.mushStemGeo, assets.mushStemMat, mushrooms, 'mushStems', false);
   make(assets.mushCapGeo, assets.mushCapMat, mushrooms, 'mushCaps', false);
+  // Ground clutter. Logs cast shadows (they're big enough to matter); sticks and
+  // pebbles don't — they'd cost a shadow draw to produce a smudge.
+  make(assets.logGeo, assets.woodMat, logs, 'logs', true, 0.2);
+  make(assets.stickGeo, assets.woodMat, sticks, 'sticks', false, 0.2);
+  make(assets.pebbleGeo, assets.stoneMat, pebbles, 'pebbles', false, 0.25);
   return meshes;
 }

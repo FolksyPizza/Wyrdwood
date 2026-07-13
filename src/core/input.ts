@@ -7,6 +7,7 @@ export class Input {
   private keys = new Set<string>();
   private mouseDX = 0;
   private mouseDY = 0;
+  private wheelDelta = 0;
   private rightClickQueued = false;
   pointerLocked = false;
 
@@ -32,6 +33,20 @@ export class Input {
       }
     });
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+    // Scroll wheel: camera zoom. Accumulated and consumed per frame like the
+    // mouse delta, so a fast flick isn't lost between frames.
+    canvas.addEventListener(
+      'wheel',
+      (e) => {
+        e.preventDefault();
+        // Browsers report wheel deltas in wildly different units (pixels, lines,
+        // pages) depending on device and OS, so normalise to a signed notch
+        // count rather than trusting the magnitude.
+        this.wheelDelta += Math.sign(e.deltaY);
+      },
+      { passive: false },
+    );
     canvas.addEventListener('mousedown', (e) => {
       if (!this.pointerLocked) return;
       this.buttons.add(e.button);
@@ -75,6 +90,13 @@ export class Input {
    */
   action(a: Action): boolean {
     return this.keys.has(keyFor(a));
+  }
+
+  /** Read & reset accumulated wheel notches (positive = scrolled down/away). */
+  consumeWheel(): number {
+    const v = this.wheelDelta;
+    this.wheelDelta = 0;
+    return v;
   }
 
   /** Read & reset accumulated mouse movement. */

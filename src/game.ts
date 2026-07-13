@@ -43,6 +43,9 @@ import { writeSave, clearSave, type SaveData } from './save/save';
 import type { SkillId } from './data/skills';
 import type { ItemStack } from './items/inventory';
 
+/** Minimum seconds between melee swings — roughly the length of the swing anim. */
+const SWING_COOLDOWN = 0.55;
+
 interface Grave {
   x: number;
   y: number;
@@ -435,8 +438,19 @@ export class Game {
     this.mobs.update(dt, this.player.position, this.dayNight.isNight, this.stats.dead);
 
     // Melee swing (LMB while playing; build mode owns clicks when active).
-    if (!this.buildMode.active && !this.uiOpen() && !this.stats.dead && this.input.consumeLeftClick()) {
+    // A swing has to *land* before you can throw another — without a cooldown you
+    // can click as fast as your mouse allows and the damage rate is bounded only
+    // by your finger, which makes every weapon stat meaningless.
+    this.swingCooldown -= dt;
+    if (
+      !this.buildMode.active &&
+      !this.uiOpen() &&
+      !this.stats.dead &&
+      this.swingCooldown <= 0 &&
+      this.input.consumeLeftClick()
+    ) {
       if (this.stats.spend(8)) {
+        this.swingCooldown = SWING_COOLDOWN;
         this.player.humanoid.swing();
         const active = this.inventory.active;
         const damage = (active ? itemDef(active.itemId).weapon?.damage : null) ?? 4;
@@ -639,6 +653,8 @@ export class Game {
   }
 
   private titleTimer = 0;
+  /** Seconds until the player can swing again. */
+  private swingCooldown = 0;
 
   private render(alpha: number, frameDt: number): void {
     // Draw (and follow) the *interpolated* position, not the last simulated one —

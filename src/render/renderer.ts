@@ -254,10 +254,12 @@ export class GameRenderer {
       new THREE.Vector2(window.innerWidth, window.innerHeight),
       0.3, // strength
       0.6, // radius
-      // Threshold in *linear HDR*, where a daylit sky sits around 2–8 and only
-      // the sun disc and fire go far above. Set this too low and the sky itself
-      // crosses it and bleeds a white haze across the horizon.
-      5.0,
+      // Threshold, in *linear HDR*. This has to sit ABOVE the sky's clamped
+      // ceiling (see clampSkyRadiance in sky.ts, currently 12) — otherwise the
+      // whole bright sky crosses the threshold, blooms, and bleeds a white haze
+      // right across the landscape. That is what has been washing the distance
+      // out. Only fire, and the sun disc itself, should be above this.
+      11.5,
     );
     this.composer.addPass(bloom);
     // Tone-map + sRGB encode. Always on: this is the conversion the renderer

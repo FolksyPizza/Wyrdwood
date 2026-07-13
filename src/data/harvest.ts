@@ -19,7 +19,17 @@ export interface HarvestDef {
   verb: string;
 }
 
-export type HarvestType = 'tree' | 'rock' | 'bush' | 'flower' | 'mushroom' | 'herb' | 'fern';
+export type HarvestType =
+  | 'tree'
+  | 'rock'
+  | 'bush'
+  | 'flower'
+  | 'mushroom'
+  | 'herb'
+  | 'fern'
+  | 'stick'
+  | 'pebble'
+  | 'log';
 
 export const HARVEST: Record<HarvestType, HarvestDef> = {
   tree: {
@@ -44,4 +54,16 @@ export const HARVEST: Record<HarvestType, HarvestDef> = {
   mushroom: { hits: 1, drops: [{ itemId: 'mushroom', count: 2 }], verb: 'Gather' },
   herb: { hits: 1, drops: [{ itemId: 'herb', count: 2 }], verb: 'Gather' },
   fern: { hits: 1, drops: [{ itemId: 'herb', count: 1 }], verb: 'Gather' },
+
+  // Ground clutter: free, instant, no tool. This is the bootstrap — you need
+  // wood and stone to make the axe and pick that let you take wood and stone
+  // from trees and boulders, so the first of each has to come from the floor.
+  stick: { hits: 1, drops: [{ itemId: 'wood', count: 1 }], verb: 'Pick up' },
+  pebble: { hits: 1, drops: [{ itemId: 'stone', count: 1 }], verb: 'Pick up' },
+  log: {
+    hits: 3,
+    tool: { kind: 'axe', hits: 1 },
+    drops: [{ itemId: 'wood', count: 5 }],
+    verb: 'Break',
+  },
 };

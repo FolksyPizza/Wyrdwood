@@ -115,7 +115,12 @@ export class DayNight {
     // applied in broad daylight, blowing the morning and evening out. Exposure
     // has to key off how far *below* the horizon the sun actually is, not off
     // the inverse of a curve that was tuned for something else.
-    gfx.renderer.toneMappingExposure = 0.95 + darknessKey * 1.5 + duskness * 0.1;
+    // Day sits low because the sky is bright; night opens right up because the
+    // player has to be able to *see* — a survival game that is unplayable for a
+    // third of its cycle is not atmospheric, it is broken. Torches and fires then
+    // brighten from there rather than being the only thing that makes night
+    // possible at all.
+    gfx.renderer.toneMappingExposure = 0.75 + darknessKey * 2.1 + duskness * 0.1;
   }
 
   get isNight(): boolean {

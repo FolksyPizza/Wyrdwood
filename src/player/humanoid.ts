@@ -37,6 +37,11 @@ export class Humanoid {
   /** Skinned materials we recolour from the character creator. */
   private tinted: THREE.MeshStandardMaterial[] = [];
   private hand: THREE.Object3D | null = null;
+  // Bones we pose *on top of* the animation, for slope work (see animate).
+  private spine: THREE.Object3D | null = null;
+  private armL: THREE.Object3D | null = null;
+  private armR: THREE.Object3D | null = null;
+  private grade = 0;
   private heldTool: THREE.Group | null = null;
   private heldToolKind: ToolKind | null = null;
   private swingTimer = 0;
@@ -63,6 +68,11 @@ export class Humanoid {
 
     // The right hand bone is where a held tool hangs.
     this.hand = model.getObjectByName('Hand.R') ?? model.getObjectByName('LowerArm.R') ?? null;
+    // GLTFLoader sanitises bone names, so the dots become nothing: "UpperArm.L"
+    // is loaded as "UpperArmL".
+    this.spine = model.getObjectByName('Chest') ?? model.getObjectByName('Torso') ?? null;
+    this.armL = model.getObjectByName('UpperArmL') ?? null;
+    this.armR = model.getObjectByName('UpperArmR') ?? null;
 
     model.traverse((o) => {
       const mesh = o as THREE.Mesh;
@@ -136,24 +146,48 @@ export class Humanoid {
     this.heldTool = tool;
   }
 
+  /**
+   * Recolour the body from the character creator.
+   *
+   * KNOWN LIMITATION: this rig has exactly three materials — Skin, Armor (the
+   * tunic, which covers torso *and* legs as one piece) and Boots. It has no hair
+   * geometry and no separate trousers, so hairColor and pantsColor have nothing
+   * to attach to and are silently ignored. The creator is currently offering
+   * choices the body cannot express.
+   *
+   * Fixing it properly means a character model with separate head/hair/torso/legs
+   * meshes. The pack's "modular men" are exactly that, but they ship without
+   * animation clips and share only bone *names* with this rig, not its bind pose
+   * — so retargeting onto them needs a real retarget step, not name matching.
+   * That's the next character task, not a tweak.
+   */
   setAppearance(a: Appearance): void {
-    // The model's own materials are named by role (Skin / Hair / clothing
-    // colours), so the creator tints the ones it recognises and leaves the rest.
     for (const mat of this.tinted) {
       const name = mat.name.toLowerCase();
       if (name.includes('skin')) mat.color.setHex(a.skinTone);
-      else if (name.includes('hair') || name.includes('eyebrow')) mat.color.setHex(a.hairColor);
-      else if (name.includes('black') || name.includes('grey') || name.includes('gray'))
-        mat.color.setHex(a.pantsColor);
-      else if (name.includes('green') || name.includes('blue') || name.includes('red'))
+      else if (name.includes('boot') || name.includes('shoe')) mat.color.setHex(a.bootsColor);
+      else if (name.includes('armor') || name.includes('armour') || name.includes('cloth')) {
         mat.color.setHex(a.shirtColor);
+      }
     }
     this.group.scale.setScalar(a.build);
   }
 
-  /** Procedural animation. `speed` = horizontal m/s, `grounded` = on floor. */
-  animate(dt: number, speed: number, grounded: boolean): void {
+  /**
+   * Procedural animation.
+   *
+   * `speed` = horizontal m/s, `grounded` = on the floor, `grade` = rise over run
+   * along the direction of travel (positive uphill).
+   *
+   * The rig ships with Idle / Walking / Run / Jump / Attack / Death and *no climb
+   * clip* — so climbing is layered on top of the walk, procedurally: bones are
+   * rotated after the mixer has written the clip's pose, which post-multiplies
+   * the extra rotation onto it. That's a real additive layer, not a replacement,
+   * so the legs keep their walk cycle while the torso and arms do the climbing.
+   */
+  animate(dt: number, speed: number, grounded: boolean, grade = 0): void {
     if (this.swingTimer > 0) this.swingTimer -= dt;
+    this.grade += (grade - this.grade) * Math.min(1, dt * 5);
 
     // The swing plays once and owns the body until it finishes.
     if (this.swingTimer <= 0) {
@@ -165,15 +199,35 @@ export class Humanoid {
       }
     }
 
-    // Match the walk cycle's cadence to how fast we're actually moving, or the
-    // feet skate across the ground.
+    // Cadence. Match the cycle to how fast we're actually moving, or the feet
+    // skate. Uphill the stride *shortens* as well as slowing, so the cadence
+    // doesn't drop as far as the speed does — that's what makes a climb read as
+    // effort rather than as slow motion.
     const cur = this.current;
+    const uphill = Math.max(0, this.grade);
     if (cur) {
-      if (cur === this.walk) cur.timeScale = Math.max(0.6, speed / 2.2);
-      else if (cur === this.run) cur.timeScale = Math.max(0.7, speed / 6);
+      if (cur === this.walk) cur.timeScale = Math.max(0.6, speed / 2.2) * (1 + uphill * 0.35);
+      else if (cur === this.run) cur.timeScale = Math.max(0.7, speed / 6) * (1 + uphill * 0.25);
       else cur.timeScale = 1;
     }
 
     this.mixer.update(dt);
+
+    // ── Additive slope pose, applied after the clip has been written ─────────
+    const moving = grounded && speed > 0.3;
+    // Lean into the hill going up, and settle back going down.
+    const lean = moving ? THREE.MathUtils.clamp(this.grade * 0.45, -0.22, 0.5) : 0;
+    if (this.spine && Math.abs(lean) > 0.001) this.spine.rotateX(lean);
+
+    // Past roughly 30°, hands come up to the slope. This is the "climb".
+    const climb = moving ? THREE.MathUtils.smoothstep(this.grade, 0.55, 1.15) : 0;
+    if (climb > 0.001) {
+      // Negative X on the upper arm swings it forward and up, out of its hang.
+      this.armL?.rotateX(-1.15 * climb);
+      this.armR?.rotateX(-1.15 * climb);
+      // Splay them outward a little so they don't clip through the chest.
+      this.armL?.rotateZ(0.25 * climb);
+      this.armR?.rotateZ(-0.25 * climb);
+    }
   }
 }
