@@ -83,6 +83,40 @@ export function makeTerrainMaterial(): THREE.MeshStandardMaterial {
       vec3 splatNor;
 
       /**
+       * De-tiling.
+       *
+       * A 1k scan repeating every few metres forms an obvious grid — the same
+       * pebble, the same crack, over and over in a lattice. It is the single
+       * loudest remaining tell that a surface is a texture rather than a place.
+       *
+       * The fix: sample the texture TWICE — once normally, once rotated by an
+       * irrational-ish angle and offset — and cross-fade between them with a slow
+       * noise. Rotating means the two lattices never line up, so there is no
+       * combined period to see; fading with a wandering mask means the boundary
+       * between them doesn't form a grid of its own either. Same scale in both
+       * taps, so no detail is lost (blending two *scales* would just soften it).
+       */
+      vec2 rot2(vec2 v, float a) {
+        float s = sin(a), c = cos(a);
+        return mat2(c, -s, s, c) * v;
+      }
+
+      float detileMask(vec2 uv) {
+        // Slow, non-repeating-ish wander. Deliberately low frequency: the mask
+        // must change far more slowly than the texture, or it reads as noise
+        // laid over the ground rather than as variation in the ground.
+        float n = sin(uv.x * 0.035 + 1.3) * cos(uv.y * 0.028 - 0.7)
+                + 0.5 * sin((uv.x + uv.y) * 0.019 + 2.1);
+        return smoothstep(-0.35, 0.35, n);
+      }
+
+      vec3 detile(sampler2D tex, vec2 uv) {
+        vec3 a = texture2D(tex, uv).rgb;
+        vec3 b = texture2D(tex, rot2(uv, 2.399) + vec2(37.1, 11.7)).rgb;
+        return mix(a, b, detileMask(uv));
+      }
+
+      /**
        * Triplanar sampling.
        *
        * The terrain's UVs are a flat top-down projection (world X,Z). That is
@@ -100,9 +134,11 @@ export function makeTerrainMaterial(): THREE.MeshStandardMaterial {
         vec3 b = abs(n);
         b = pow(b, vec3(4.0));          // sharpen, so faces don't cross-fade to mud
         b /= (b.x + b.y + b.z);
-        return texture2D(tex, p.yz * scale).rgb * b.x
-             + texture2D(tex, p.xz * scale).rgb * b.y
-             + texture2D(tex, p.xy * scale).rgb * b.z;
+        // De-tiled on each projection too — a cliff face repeats just as visibly
+        // as a meadow does.
+        return detile(tex, p.yz * scale) * b.x
+             + detile(tex, p.xz * scale) * b.y
+             + detile(tex, p.xy * scale) * b.z;
       }
       ` +
       sh.fragmentShader
@@ -123,16 +159,18 @@ export function makeTerrainMaterial(): THREE.MeshStandardMaterial {
           vec3 rockArm    = triplanar(uRockArm, vWPos, wn, uScale.y);
 
           vec3 albedo =
-              texture2D(uGrassMap, gUv).rgb * w.x
-            + rockAlbedo                    * w.y
-            + texture2D(uSandMap,  sUv).rgb * w.z
-            + texture2D(uSnowMap,  nUv).rgb * w.w;
+              detile(uGrassMap, gUv) * w.x
+            + rockAlbedo             * w.y
+            + detile(uSandMap,  sUv) * w.z
+            + detile(uSnowMap,  nUv) * w.w;
 
+          // Normals are de-tiled with the SAME mask as the albedo, or the lighting
+          // would disagree with the colour about where each rock is.
           splatNor =
-              texture2D(uGrassNor, gUv).xyz * w.x
-            + rockNor                       * w.y
-            + texture2D(uSandNor,  sUv).xyz * w.z
-            + texture2D(uSnowNor,  nUv).xyz * w.w;
+              detile(uGrassNor, gUv) * w.x
+            + rockNor                * w.y
+            + detile(uSandNor,  sUv) * w.z
+            + detile(uSnowNor,  nUv) * w.w;
 
           splatArm =
               texture2D(uGrassArm, gUv).rgb * w.x

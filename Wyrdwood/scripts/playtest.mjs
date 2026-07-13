@@ -34,7 +34,11 @@ const page = await browser.newPage();
 page.on('console', (msg) => console.log(`[console.${msg.type()}]`, msg.text()));
 page.on('pageerror', (err) => console.log('[pageerror]', err.message));
 
-await page.goto(URL, { waitUntil: 'networkidle2' });
+// 'networkidle2' waited for the network to go quiet — but the game streams
+// textures, models and chunks continuously, so it never does, and the harness
+// just timed out. Wait for the document instead, then rely on --wait for the
+// game to actually come up.
+await page.goto(URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
 await new Promise((r) => setTimeout(r, WAIT));
 
 // Optional JS to evaluate BEFORE the key/mouse sequence (setup, e.g. select a blueprint).

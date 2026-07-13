@@ -112,8 +112,13 @@ export class ScatterAssets {
   });
 
   readonly trunkMat = makeBarkMaterial();
-  readonly foliageMat = makeLeafMaterial();
-  readonly foliage2Mat = this.foliageMat;
+  // Three DIFFERENT cluster cards, one per canopy tier. Using one texture for
+  // every card meant a tree was the same photograph repeated 36 times, and a
+  // forest was that same photograph a thousand times — which is exactly what
+  // makes it read as wallpaper rather than as leaves.
+  readonly foliageMat = makeLeafClusterMaterial('foliage/leaves', LEAF_RECTS, 0xbeef);
+  readonly foliage2Mat = makeLeafClusterMaterial('foliage/leaves', LEAF_RECTS, 0x1c3d);
+  readonly foliage3Mat = makeLeafClusterMaterial('foliage/leaves', LEAF_RECTS, 0x7a91);
   readonly rockMat = makeRockMaterial();
   /** Bushes get their own leaf cluster from the shrub scan — broad leaves, some
    * of them autumn-yellow, which is where most of the undergrowth's colour
@@ -366,10 +371,6 @@ const LEAF_RECTS = [
   { u: 0.22, v: 0.03, w: 0.15, h: 0.42 },
   { u: 0.43, v: 0.03, w: 0.14, h: 0.4 },
 ];
-
-function makeLeafMaterial(): THREE.MeshStandardMaterial {
-  return makeLeafClusterMaterial('foliage/leaves', LEAF_RECTS, 0xbeef);
-}
 
 /** Canopy/bush material: leaves stamped from a scan into a clump card. */
 function makeLeafClusterMaterial(
@@ -727,7 +728,7 @@ export function buildScatterMeshes(
   make(assets.trunkGeo, assets.trunkMat, trees, 'trunks', true, 0.25);
   make(assets.foliageGeo, assets.foliageMat, trees, 'foliage', true, 1);
   make(assets.foliage2Geo, assets.foliage2Mat, trees, 'foliage2', true, 1);
-  make(assets.foliage3Geo, assets.foliageMat, trees, 'foliage3', true, 1);
+  make(assets.foliage3Geo, assets.foliage3Mat, trees, 'foliage3', true, 1);
   make(assets.rockGeo, assets.rockMat, rocks, 'rocks', true, 0.3);
   make(assets.bushGeo, assets.bushMat, bushes, 'bushes', false, 1);
   // Fruit. Not tinted: a berry bush should read as a berry bush at a glance, and
