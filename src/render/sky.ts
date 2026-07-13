@@ -57,8 +57,12 @@ export class SkyDome {
     const u = this.sky.material.uniforms;
     u['turbidity']!.value = 5;
     u['rayleigh']!.value = 1.8;
-    u['mieCoefficient']!.value = 0.004;
-    u['mieDirectionalG']!.value = 0.75;
+    // Mie scattering is the forward glare around the sun. At 0.004/0.75 the halo
+    // was enormous: looking anywhere near the sun drowned the entire landscape
+    // in white, which is most of what read as "washed out". Real air scatters
+    // less than this, and a game has to be legible in every direction.
+    u['mieCoefficient']!.value = 0.0016;
+    u['mieDirectionalG']!.value = 0.6;
     // three's Sky has real volumetric cloud noise built in — drifting cumulus,
     // lit from the sun's side. Far better than a painted cloud texture, and it
     // reacts to sunrise/sunset for free.
@@ -122,8 +126,8 @@ export class SkyDome {
     // Thicker atmosphere near the horizon exaggerates sunrise/sunset reds.
     // Turbidity is haze: high values give a milky white sky, so a clear midday
     // wants it low, and only the low sun gets the thick, warm, hazy air.
-    u['rayleigh']!.value = 1.6 + (1 - Math.abs(elevation)) * 2.2;
-    u['turbidity']!.value = 2.2 + (1 - Math.abs(elevation)) * 4.5;
+    u['rayleigh']!.value = 1.6 + (1 - Math.abs(elevation)) * 2.0;
+    u['turbidity']!.value = 1.8 + (1 - Math.abs(elevation)) * 3.0;
     u['time']!.value = worldClock.value; // drifts the clouds
 
     this.starMat.opacity = (1 - dayness) * 0.9;
@@ -140,13 +144,17 @@ export class SkyDome {
       // horizon's colour, so it stays a touch darker and bluer than the sky —
       // matching the sky exactly is what produced the white-out haze, because
       // the far terrain then dissolved into the background completely.
+      // Deliberately darker and less saturated than the sky. Fog that matches the
+      // sky exactly makes distant land dissolve into the background — which is
+      // exactly the white-out. Distant hills should read as *hills*, just paler
+      // and bluer than near ones.
       fog.color.setRGB(
-        night + dayness * 0.26 + (1 - Math.abs(elevation)) * 0.2, // keep sunset warmth
-        night + dayness * 0.34,
-        night + dayness * 0.45,
+        night + dayness * 0.2 + (1 - Math.abs(elevation)) * 0.14, // keep sunset warmth
+        night + dayness * 0.26,
+        night + dayness * 0.36,
       );
       // Thin: a clear day has very little haze inside a few hundred metres.
-      fog.density = 0.0009 + (1 - dayness) * 0.0012;
+      fog.density = 0.0007 + (1 - dayness) * 0.001;
     }
 
     if (gfx) this.updateEnvironment(gfx, elevation);

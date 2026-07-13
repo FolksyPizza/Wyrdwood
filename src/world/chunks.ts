@@ -271,9 +271,12 @@ export class ChunkManager {
         // Ground-layer weights. Rock takes over on steep faces, sand hugs the
         // waterline, snow caps the peaks, grass fills the rest.
         const slope = 1 - ny; // 0 flat … ~1 vertical
-        const wRock = smoothstep(0.25, 0.6, slope);
+        // Rock takes over earlier and harder — a slope past ~0.35 will not hold
+        // soil, and painting grass onto cliff faces is what made the mountains
+        // look like green pillows.
+        const wRock = smoothstep(0.18, 0.5, slope);
         const wSand = 1 - smoothstep(0.4, 2.6, wy - SEA_LEVEL);
-        const wSnow = smoothstep(30, 38, wy);
+        const wSnow = smoothstep(58, 74, wy) * (1 - smoothstep(0.55, 0.95, slope));
         const wGrass = Math.max(0, 1 - wRock - wSand - wSnow);
         splat[vi * 4] = wGrass;
         splat[vi * 4 + 1] = wRock;
