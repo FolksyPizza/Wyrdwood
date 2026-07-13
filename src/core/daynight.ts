@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { GameRenderer } from '../render/renderer';
 import { worldConfig } from '../data/difficulty';
+import { settings } from '../data/settings';
 
 const DAY_SKY = new THREE.Color(0x87b5e0);
 const DUSK_SKY = new THREE.Color(0xd98e57);
@@ -16,6 +17,11 @@ const MOON = new THREE.Color(0x93b0e8);
  * default cycle is 30 minutes and the player wants most of it to be usable.
  * 0.15 → 0.85 is 70% daylight (21 min day, 9 min night at the default length).
  */
+function smoothstep(e0: number, e1: number, x: number): number {
+  const t = THREE.MathUtils.clamp((x - e0) / (e1 - e0), 0, 1);
+  return t * t * (3 - 2 * t);
+}
+
 const SUNRISE = 0.15;
 const SUNSET = 0.85;
 
@@ -85,6 +91,22 @@ export class DayNight {
     // How far below the horizon the sun is: 0 by day, 1 in deep night.
     const darknessKey = THREE.MathUtils.clamp(-elevation * 3, 0, 1);
 
+    // How bright the SKY is — which is not the same thing as how strong the sun
+    // is, and conflating the two was the bug.
+    //
+    // `dayness` ramps at 3x elevation, so it is ~0 until the sun is well clear of
+    // the horizon. Keying the ambient and environment light off it meant that at
+    // sunrise the land got almost no light at all — measured mean luma 0.03,
+    // essentially black — while the sky above it was fully lit. A blown white sky
+    // over a black landscape is what reads as "overexposed", even though nothing
+    // is actually clipping.
+    //
+    // In reality the sky is already bright at sunrise (that is what golden hour
+    // *is*): the direct sun is weak and reddened, but the dome overhead is
+    // pouring light down. So the fill light follows the sky, and only the key
+    // light follows the sun.
+    const skyUp = smoothstep(-0.22, 0.14, elevation);
+
     // Sun by day, moon by night, warm at the horizon.
     this.sunColor.copy(DAY_SUN).lerp(DUSK_SUN, duskness).lerp(MOON, darknessKey * 0.85);
     gfx.sun.color.copy(this.sunColor);
@@ -94,9 +116,15 @@ export class DayNight {
     // campfire still matters.
     gfx.sun.intensity = 3.4 * dayness + 0.95 * darknessKey;
 
-    // Ground-bounce fill. Small by day (the sky environment map does that work),
-    // but it has to carry more of the load at night.
-    gfx.ambient.intensity = 0.06 + 0.1 * dayness + 0.5 * darknessKey;
+    // A twilight-only lift, which vanishes by mid-morning. The Sky model's
+    // irradiance at a 3-degree sun really is tiny, so following it faithfully
+    // leaves dawn and dusk almost unlit — measured land luma 0.05, near black.
+    // Adding it to the base terms instead would brighten noon along with it, so
+    // it has to be a term that decays as `dayness` climbs.
+    const twilightFill = (1 - dayness) * skyUp;
+
+    // Ground-bounce fill — follows the sky, not the sun.
+    gfx.ambient.intensity = 0.06 + 0.26 * skyUp + 0.35 * darknessKey + 0.55 * twilightFill;
     gfx.ambient.color.copy(DAY_SKY).lerp(NIGHT_SKY, nightness).lerp(DUSK_SKY, duskness * 0.4);
     gfx.ambient.groundColor.setRGB(
       0.15 + dayness * 0.2,
@@ -104,8 +132,9 @@ export class DayNight {
       0.12 + dayness * 0.12,
     );
 
-    // How strongly PBR materials pick up the sky.
-    gfx.scene.environmentIntensity = 0.14 + 0.42 * dayness + 0.25 * darknessKey;
+    // How strongly PBR materials pick up the sky. Also follows the sky.
+    gfx.scene.environmentIntensity =
+      0.12 + 0.5 * skyUp + 0.2 * darknessKey + 0.85 * twilightFill;
 
     // Exposure.
     //
@@ -116,11 +145,20 @@ export class DayNight {
     // has to key off how far *below* the horizon the sun actually is, not off
     // the inverse of a curve that was tuned for something else.
     // Day sits low because the sky is bright; night opens right up because the
-    // player has to be able to *see* — a survival game that is unplayable for a
-    // third of its cycle is not atmospheric, it is broken. Torches and fires then
-    // brighten from there rather than being the only thing that makes night
-    // possible at all.
-    gfx.renderer.toneMappingExposure = 0.75 + darknessKey * 2.1 + duskness * 0.1;
+    // player has to be able to *see*.
+    //
+    // The `duskness` term used to add to this, which was wrong: duskness peaks
+    // when the sun is ON the horizon — the single brightest, most contrasty
+    // moment of the day — and it was pushing exposure UP right then. Sunrise and
+    // sunset were being deliberately blown out. Removed.
+    // Twilight still needs a little help: the sky is up but the sun has not yet
+    // done any real work, so the scene is genuinely dim. Peaks at dawn/dusk and
+    // vanishes by mid-morning — and it must NOT be the old `duskness` term, which
+    // peaked with the sun exactly on the horizon (the brightest, most contrasty
+    // moment of the day) and was blowing sunrise and sunset out on purpose.
+    const base = 0.75 + darknessKey * 2.1 + twilightFill * 0.8;
+    // Player's exposure bias, in stops.
+    gfx.renderer.toneMappingExposure = base * Math.pow(2, settings.exposure);
   }
 
   get isNight(): boolean {

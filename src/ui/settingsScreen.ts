@@ -358,6 +358,10 @@ export class SettingsScreen {
     this.slider(pane, 'Saturation', () => settings.saturation, (v) => (settings.saturation = v), {
       min: 0.6, max: 1.8, step: 0.02, fmt: (v) => `${v.toFixed(2)}×`,
     });
+    this.slider(pane, 'Exposure', () => settings.exposure, (v) => (settings.exposure = v), {
+      min: -1.5, max: 1.5, step: 0.1,
+      fmt: (v) => (v === 0 ? '0 EV' : `${v > 0 ? '+' : ''}${v.toFixed(1)} EV`),
+    });
 
     this.group(pane, 'Display');
     this.slider(pane, 'Resolution scale', () => settings.maxPixelRatio, (v) => (settings.maxPixelRatio = v), {

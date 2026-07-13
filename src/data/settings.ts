@@ -102,6 +102,14 @@ export interface Settings {
   vignette: number;
   /** Colour-grade saturation (1 = neutral). */
   saturation: number;
+  /**
+   * Exposure bias, in stops. 0 = the tuned default; negative darkens.
+   *
+   * Displays differ enough (and taste differs enough) that a single baked-in
+   * exposure cannot be right for everyone — this is the standard camera control,
+   * and it ends the argument.
+   */
+  exposure: number;
   fov: number;
 
   // ── Controls ─────────────────────────────────────────────────────────────
@@ -148,6 +156,7 @@ export const DEFAULT_SETTINGS: Settings = {
   quality: 'high',
   ...PRESETS.high,
   saturation: 1.28,
+  exposure: 0,
   fov: 70,
 
   mouseSensitivity: 1,
