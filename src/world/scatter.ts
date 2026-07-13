@@ -1,0 +1,475 @@
+import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { cellHash, mulberry32 } from './noise';
+import { SEA_LEVEL, type Terrain } from './terrain';
+import { worldClock } from '../render/textures';
+import { applyARM, loadPBR, makeLeafCluster } from '../render/assets';
+
+export type ScatterType = 'tree' | 'rock' | 'bush' | 'flower' | 'mushroom' | 'herb';
+
+/** A scattered world object — serializable identity for harvesting. */
+export interface ScatterInstance {
+  type: ScatterType;
+  x: number;
+  y: number;
+  z: number;
+  scale: number;
+  rotation: number;
+  /** Remaining harvest hits (initialized from HARVEST data on first hit). */
+  hp?: number;
+}
+
+/** Spacing of the deterministic scatter grid within a chunk (world units). */
+const CELL = 4;
+
+/** Deterministically list scatter objects for a chunk (seed + coords → same result). */
+export function scatterForChunk(
+  terrain: Terrain,
+  cx: number,
+  cz: number,
+  chunkSize: number,
+): ScatterInstance[] {
+  const out: ScatterInstance[] = [];
+  const x0 = cx * chunkSize;
+  const z0 = cz * chunkSize;
+  for (let gx = 0; gx < chunkSize / CELL; gx++) {
+    for (let gz = 0; gz < chunkSize / CELL; gz++) {
+      const cellX = Math.floor(x0 / CELL) + gx;
+      const cellZ = Math.floor(z0 / CELL) + gz;
+      const roll = cellHash(terrain.seed, cellX, cellZ, 1);
+      // Jittered position inside the cell.
+      const jx = cellHash(terrain.seed, cellX, cellZ, 2);
+      const jz = cellHash(terrain.seed, cellX, cellZ, 3);
+      const x = x0 + gx * CELL + jx * CELL;
+      const z = z0 + gz * CELL + jz * CELL;
+      const y = terrain.height(x, z);
+      if (y < SEA_LEVEL + 1.0) continue; // no vegetation under water
+      if (terrain.slopeAt(x, z) > 0.9) continue; // cliffs stay bare
+      const biome = terrain.biomeAt(x, z, y);
+
+      // Cumulative-probability pick across all scatter types for this cell.
+      let type: ScatterType | null = null;
+      let acc = biome.treeDensity;
+      if (roll < acc) type = 'tree';
+      else if (roll < (acc += biome.rockDensity)) type = 'rock';
+      else if (roll < (acc += biome.bushDensity)) type = 'bush';
+      else if (roll < (acc += biome.flowerDensity)) type = 'flower';
+      else if (roll < (acc += biome.mushroomDensity)) type = 'mushroom';
+      else if (roll < (acc += biome.herbDensity)) type = 'herb';
+      if (!type) continue;
+
+      const isPlant = type === 'flower' || type === 'mushroom' || type === 'herb';
+      out.push({
+        type,
+        x,
+        y,
+        z,
+        scale: isPlant
+          ? 0.8 + cellHash(terrain.seed, cellX, cellZ, 4) * 0.5
+          : 0.75 + cellHash(terrain.seed, cellX, cellZ, 4) * 0.6,
+        rotation: cellHash(terrain.seed, cellX, cellZ, 5) * Math.PI * 2,
+      });
+    }
+  }
+  return out;
+}
+
+/** Shared low-poly geometries/materials (created once, reused by every chunk). */
+export class ScatterAssets {
+  // Trunk: a tapered cylinder wearing real scanned bark. 10 sides (not 6) so the
+  // silhouette doesn't read as a hexagon at close range, and the UVs are scaled
+  // so the bark tiles at roughly life size rather than being stretched up 3.4 m.
+  readonly trunkGeo = makeTrunk(0.16, 0.34, 3.4);
+  readonly foliageGeo = makeCanopy(2.0, 2.4, 16, 0.0);
+  readonly foliage2Geo = makeCanopy(1.5, 1.9, 12, 1.5); // upper tier
+  readonly foliage3Geo = makeCanopy(0.95, 1.5, 8, 2.6); // crown
+  readonly rockGeo = makeRock();
+  readonly bushGeo = makeCanopy(0.8, 0.9, 9, 0.0);
+
+  readonly trunkMat = makeBarkMaterial();
+  readonly foliageMat = makeLeafMaterial();
+  readonly foliage2Mat = this.foliageMat;
+  readonly rockMat = makeRockMaterial();
+  readonly bushMat = this.foliageMat;
+
+  // Flowers: stem + petal head + bright center.
+  readonly flowerStemGeo = new THREE.CylinderGeometry(0.015, 0.02, 0.4, 4);
+  readonly flowerHeadGeo = new THREE.IcosahedronGeometry(0.11, 0);
+  readonly flowerCoreGeo = new THREE.SphereGeometry(0.05, 6, 5);
+  readonly flowerStemMat = new THREE.MeshStandardMaterial({ color: 0x4a7a3a, roughness: 0.9 });
+  readonly flowerHeadMat = new THREE.MeshStandardMaterial({ color: 0xe8d24a, roughness: 0.85, flatShading: true });
+  readonly flowerCoreMat = new THREE.MeshStandardMaterial({ color: 0xd98a3d, roughness: 0.8 });
+
+  // Mushrooms: pale stem + red spotted cap.
+  readonly mushStemGeo = new THREE.CylinderGeometry(0.05, 0.07, 0.24, 6);
+  readonly mushCapGeo = new THREE.SphereGeometry(0.16, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2);
+  readonly mushStemMat = new THREE.MeshStandardMaterial({ color: 0xe4d8c0, roughness: 0.9 });
+  readonly mushCapMat = new THREE.MeshStandardMaterial({ color: 0xb43b32, roughness: 0.8, flatShading: true });
+
+  // Herbs: small low leafy cluster.
+  readonly herbGeo = new THREE.ConeGeometry(0.16, 0.36, 5);
+  readonly herbMat = new THREE.MeshStandardMaterial({ color: 0x5b8a3a, roughness: 0.9, flatShading: true });
+
+  // Grass tuft: a small fan of blade-quads (decorative, non-interactive).
+  readonly grassGeo = makeGrassTuft();
+  readonly grassMat = makeGrassMaterial();
+
+  constructor() {
+    this.trunkGeo.translate(0, 1.7, 0); // pivot at base
+    // The canopy tiers already stagger themselves vertically (makeCanopy's
+    // yOffset), so they all sit on the same base — just below the trunk's top.
+    this.foliageGeo.translate(0, 2.7, 0);
+    this.foliage2Geo.translate(0, 2.7, 0);
+    this.foliage3Geo.translate(0, 2.7, 0);
+    this.bushGeo.scale(1, 0.8, 1);
+    this.bushGeo.translate(0, 0.15, 0);
+    // Plant pivots at ground level.
+    this.flowerStemGeo.translate(0, 0.2, 0);
+    this.flowerHeadGeo.scale(1, 0.6, 1);
+    this.flowerHeadGeo.translate(0, 0.42, 0);
+    this.flowerCoreGeo.translate(0, 0.44, 0);
+    this.mushStemGeo.translate(0, 0.12, 0);
+    this.mushCapGeo.translate(0, 0.24, 0);
+    this.herbGeo.translate(0, 0.18, 0);
+  }
+}
+
+/** Tapered trunk with bark UVs scaled to life size (rather than stretched). */
+function makeTrunk(rTop: number, rBot: number, h: number): THREE.BufferGeometry {
+  const g = new THREE.CylinderGeometry(rTop, rBot, h, 10, 1, true);
+  const uv = g.getAttribute('uv') as THREE.BufferAttribute;
+  const circumference = 2 * Math.PI * rBot;
+  for (let i = 0; i < uv.count; i++) {
+    uv.setXY(i, uv.getX(i) * circumference * 0.8, uv.getY(i) * h * 0.35);
+  }
+  return g;
+}
+
+/**
+ * A canopy tier: leaf cards scattered over the surface of a squashed sphere.
+ * A solid cone is the classic procedural-tree tell — a real canopy is a shell of
+ * leaf clusters with sky showing through it, so that's what this builds. Each
+ * card is a quad UV'd to one clump of the scanned leaf atlas, tilted outward
+ * along the sphere normal so the shell catches light from the right side.
+ */
+function makeCanopy(radius: number, height: number, cards: number, yOffset: number): THREE.BufferGeometry {
+  const geos: THREE.BufferGeometry[] = [];
+  const rng = mulberry32(0x1eaf + cards * 7919);
+  for (let i = 0; i < cards; i++) {
+    // Distribute over the shell of a squashed sphere. The sqrt spreads points
+    // evenly by area rather than bunching them at the pole.
+    const t = (i + 0.5) / cards;
+    const phi = Math.acos(1 - 1.7 * t); // bias to the top/sides, not the underside
+    const theta = i * 2.399 + rng() * 0.7;
+
+    const size = radius * (0.75 + rng() * 0.45);
+    const q = new THREE.PlaneGeometry(size, size);
+    // Each card is a whole leaf clump (see makeLeafCluster), so it uses the full
+    // texture — no atlas sub-rect.
+    q.rotateZ(rng() * Math.PI * 2);
+    q.rotateX(phi - Math.PI / 2);
+    q.rotateY(theta);
+    q.translate(
+      Math.sin(phi) * Math.cos(theta) * radius * 0.62,
+      yOffset + Math.cos(phi) * height * 0.45 + height * 0.12,
+      Math.sin(phi) * Math.sin(theta) * radius * 0.62,
+    );
+    geos.push(q);
+  }
+  return mergeGeometries(geos);
+}
+
+/** Lumpy boulder: an icosphere pushed around by noise, so no two rocks match. */
+function makeRock(): THREE.BufferGeometry {
+  const g = new THREE.IcosahedronGeometry(0.8, 2);
+  const pos = g.getAttribute('position') as THREE.BufferAttribute;
+  const v = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i);
+    const n =
+      Math.sin(v.x * 3.1 + 1.3) * Math.cos(v.y * 2.7) * Math.sin(v.z * 3.9 - 0.4) * 0.22 +
+      Math.sin(v.x * 8.3) * Math.sin(v.z * 7.1) * 0.06;
+    v.multiplyScalar(1 + n);
+    v.y *= 0.75; // boulders sit low, not spherical
+    pos.setXYZ(i, v.x, v.y, v.z);
+  }
+  g.computeVertexNormals();
+  // Spherical UVs so the scanned rock texture wraps without a visible seam pole.
+  const uv = new Float32Array(pos.count * 2);
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i).normalize();
+    uv[i * 2] = (Math.atan2(v.z, v.x) / (Math.PI * 2) + 0.5) * 1.6;
+    uv[i * 2 + 1] = (Math.asin(THREE.MathUtils.clamp(v.y, -1, 1)) / Math.PI + 0.5) * 1.6;
+  }
+  g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  return g;
+}
+
+function makeBarkMaterial(): THREE.MeshStandardMaterial {
+  const b = loadPBR('bark/pine');
+  const mat = new THREE.MeshStandardMaterial({
+    map: b.map,
+    normalMap: b.normalMap,
+    side: THREE.DoubleSide, // trunk is open-ended, so we see the inside at the top
+  });
+  applyARM(mat, b.armMap);
+  return mat;
+}
+
+function makeRockMaterial(): THREE.MeshStandardMaterial {
+  const r = loadPBR('terrain/rock');
+  const mat = new THREE.MeshStandardMaterial({ map: r.map, normalMap: r.normalMap });
+  applyARM(mat, r.armMap);
+  return mat;
+}
+
+/**
+ * Where the individual leaves sit in the scanned atlas: a grid of single leaves
+ * on black. makeLeafCluster stamps these into a dense clump card.
+ */
+const LEAF_RECTS = [
+  { u: 0.02, v: 0.55, w: 0.16, h: 0.42 },
+  { u: 0.17, v: 0.6, w: 0.15, h: 0.38 },
+  { u: 0.35, v: 0.63, w: 0.13, h: 0.35 },
+  { u: 0.52, v: 0.62, w: 0.13, h: 0.36 },
+  { u: 0.68, v: 0.58, w: 0.16, h: 0.4 },
+  { u: 0.02, v: 0.06, w: 0.17, h: 0.36 },
+  { u: 0.22, v: 0.03, w: 0.15, h: 0.42 },
+  { u: 0.43, v: 0.03, w: 0.14, h: 0.4 },
+];
+
+function makeLeafMaterial(): THREE.MeshStandardMaterial {
+  const cluster = makeLeafCluster('foliage/leaves', LEAF_RECTS, { leaves: 38, seed: 0xbeef });
+  const mat = new THREE.MeshStandardMaterial({
+    map: cluster,
+    // The cluster texture carries its own alpha, so cut straight from it.
+    alphaTest: 0.42,
+    transparent: false,
+    side: THREE.DoubleSide,
+    roughness: 0.95, // matte, for the same reason as the grass cards
+    metalness: 0,
+  });
+
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms['uWind'] = worldClock;
+    sh.vertexShader =
+      'uniform float uWind;\n' +
+      sh.vertexShader
+        // Same problem as grass: a leaf card's true normal points out of the
+        // quad, so half the canopy lights black. Blending it towards the
+        // outward direction from the trunk makes the canopy shade like a mass
+        // of foliage rather than a pile of flat cards.
+        .replace(
+          '#include <beginnormal_vertex>',
+          `vec3 objectNormal = normalize(mix(normalize(position + vec3(0.0, 0.6, 0.0)), normal, 0.35));`,
+        )
+        .replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
+         float wph = uWind * 1.1 + instanceMatrix[3].x * 0.3 + instanceMatrix[3].z * 0.3;
+         float sway = smoothstep(0.4, 3.5, position.y) * 0.09;
+         transformed.x += sin(wph) * sway;
+         transformed.z += cos(wph * 0.8) * sway * 0.7;`,
+        );
+  };
+  return mat;
+}
+
+/**
+ * Grass tuft: crossed billboards carrying a *photograph* of a real grass clump,
+ * cut out of the scanned atlas (see GRASS_CARDS). Flat-shaded geometric blades
+ * are the single biggest tell that a scene is procedural — a photo card with an
+ * alpha cutout costs two quads and looks like grass.
+ *
+ * Each card samples a different clump from the atlas, so a field doesn't repeat.
+ * UV v runs 0 at the root → 1 at the tip so the wind shader can bend the tips.
+ */
+function makeGrassTuft(): THREE.BufferGeometry {
+  const geos: THREE.BufferGeometry[] = [];
+  const N = 3; // three cards at 60° — reads as volume from any angle
+  for (let i = 0; i < N; i++) {
+    // Taller than wide. The old card was 0.55 × 0.42, which is a doormat; real
+    // meadow grass stands up, and the height is what fills the gaps between
+    // tufts when you look across a field at a shallow angle.
+    const g = new THREE.PlaneGeometry(0.5, 0.62, 1, 3);
+    g.translate(0, 0.31, 0);
+    g.rotateY((i / N) * Math.PI);
+    // Pick one of the atlas clumps for this card.
+    const card = GRASS_CARDS[i % GRASS_CARDS.length]!;
+    const uv = g.getAttribute('uv') as THREE.BufferAttribute;
+    for (let v = 0; v < uv.count; v++) {
+      uv.setXY(v, card.u + uv.getX(v) * card.w, card.v + uv.getY(v) * card.h);
+    }
+    geos.push(g);
+  }
+  // Manual merge (position + uv + index), no external util.
+  let posLen = 0;
+  let idxLen = 0;
+  for (const g of geos) {
+    posLen += (g.getAttribute('position').array as Float32Array).length;
+    idxLen += (g.getIndex()!.array as ArrayLike<number>).length;
+  }
+  const positions = new Float32Array(posLen);
+  const uvs = new Float32Array((posLen / 3) * 2);
+  const indices = new Uint16Array(idxLen);
+  let po = 0;
+  let uo = 0;
+  let io = 0;
+  let vbase = 0;
+  for (const g of geos) {
+    const p = g.getAttribute('position').array as Float32Array;
+    const u = g.getAttribute('uv').array as Float32Array;
+    const idx = g.getIndex()!.array as ArrayLike<number>;
+    positions.set(p, po);
+    uvs.set(u, uo);
+    for (let i = 0; i < idx.length; i++) indices[io + i] = idx[i]! + vbase;
+    po += p.length;
+    uo += u.length;
+    io += idx.length;
+    vbase += p.length / 3;
+  }
+  const merged = new THREE.BufferGeometry();
+  merged.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  merged.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  merged.setIndex(new THREE.BufferAttribute(indices, 1));
+  merged.computeVertexNormals();
+  return merged;
+}
+
+/** Grass material with a shared wind uniform that bends blade tips.
+ * Base color is white so per-instance colors define the final green directly
+ * (multiplying a green base by a green tint compounds into near-black). */
+/**
+ * Sub-rectangles of the scanned grass atlas that contain a whole clump, in UV
+ * space with (0,0) bottom-left. The atlas is packed for the original
+ * photogrammetry mesh, so most of it is smeared UV filler — these are the
+ * regions that actually hold usable billboards (the bottom row of the image).
+ */
+/**
+ * Where the grass carpet fades out, in metres from the camera. Must stay inside
+ * the smallest grassRadius (1 chunk = 64 m guaranteed in every direction), or
+ * the ring would end before the fade does and you'd see the edge.
+ */
+const GRASS_FADE = { start: 40, end: 58 };
+
+const GRASS_CARDS = [
+  { u: 0.215, v: 0.109, w: 0.2, h: 0.127 },
+  { u: 0.586, v: 0.113, w: 0.195, h: 0.115 },
+  { u: 0.259, v: 0.009, w: 0.2, h: 0.098 },
+  { u: 0.6, v: 0.009, w: 0.17, h: 0.09 },
+  { u: 0.015, v: 0.012, w: 0.14, h: 0.095 },
+];
+
+function makeGrassMaterial(): THREE.MeshStandardMaterial {
+  const g = loadPBR('foliage/grass_blades', { alpha: true, arm: false });
+  const mat = new THREE.MeshStandardMaterial({
+    map: g.map,
+    alphaMap: g.alphaMap,
+    // Cutout, not blending: alpha-tested grass writes depth, so tufts sort
+    // correctly against each other with no per-instance depth sorting.
+    alphaTest: 0.4,
+    side: THREE.DoubleSide,
+    // No roughness map from the scan. Its ARM green channel is dark, which reads
+    // as a near-mirror surface — the tufts then reflect the sky and the whole
+    // field turns silver. Vegetation is uniformly rough; just say so.
+    roughness: 0.95,
+    metalness: 0,
+  });
+
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms['uWind'] = worldClock;
+    sh.vertexShader =
+      'uniform float uWind;\n' +
+      sh.vertexShader
+        // Cards are vertical planes, so their true normals point sideways and
+        // each card lights like a little wall — a field of them reads as shiny
+        // debris scattered on the hill. Shading them with a mostly-upward normal
+        // makes grass catch light the way the ground under it does.
+        .replace(
+          '#include <beginnormal_vertex>',
+          `vec3 objectNormal = normalize(vec3(0.0, 1.0, 0.0) + normal * 0.3);`,
+        )
+        .replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
+         // Bend from height above the tuft's base. (Not uv.y — these UVs point
+         // into an atlas sub-rect now, so they no longer run 0→1 up the blade.)
+         float h = clamp(position.y / 0.62, 0.0, 1.0);
+         float wph = uWind * 1.6 + instanceMatrix[3].x * 0.35 + instanceMatrix[3].z * 0.35;
+         float bend = h * h * 0.14;
+         transformed.x += sin(wph) * bend;
+         transformed.z += cos(wph * 0.7) * bend * 0.7;
+
+         // Distance fade. The dense carpet only exists in a ring around the
+         // player (quality().grassRadius), and ending it at a chunk border would
+         // draw a hard line of grass across the field. Instead the tufts sink
+         // into the ground as they approach the edge of the ring, which reads as
+         // the grass simply becoming ground texture — the terrain's albedo is a
+         // photo of grass anyway, so the handoff is invisible.
+         vec3 wpos = (modelMatrix * instanceMatrix * vec4(position, 1.0)).xyz;
+         float dist = distance(wpos.xz, cameraPosition.xz);
+         float fade = 1.0 - smoothstep(${GRASS_FADE.start.toFixed(1)}, ${GRASS_FADE.end.toFixed(1)}, dist);
+         transformed.y *= fade;`,
+        );
+  };
+  return mat;
+}
+
+const M = new THREE.Matrix4();
+const P = new THREE.Vector3();
+const Q = new THREE.Quaternion();
+const S = new THREE.Vector3();
+const Y_AXIS = new THREE.Vector3(0, 1, 0);
+
+/** Build the instanced meshes for one chunk's scatter. */
+export function buildScatterMeshes(
+  assets: ScatterAssets,
+  instances: ScatterInstance[],
+): THREE.InstancedMesh[] {
+  const trees = instances.filter((i) => i.type === 'tree');
+  const rocks = instances.filter((i) => i.type === 'rock');
+  const bushes = instances.filter((i) => i.type === 'bush');
+  const flowers = instances.filter((i) => i.type === 'flower');
+  const mushrooms = instances.filter((i) => i.type === 'mushroom');
+  const herbs = instances.filter((i) => i.type === 'herb');
+
+  const meshes: THREE.InstancedMesh[] = [];
+  const make = (
+    geo: THREE.BufferGeometry,
+    mat: THREE.Material,
+    list: ScatterInstance[],
+    name: string,
+    castShadow = true,
+  ) => {
+    if (list.length === 0) return;
+    const mesh = new THREE.InstancedMesh(geo, mat, list.length);
+    mesh.name = name;
+    mesh.castShadow = castShadow;
+    mesh.receiveShadow = true;
+    list.forEach((inst, i) => {
+      P.set(inst.x, inst.y, inst.z);
+      Q.setFromAxisAngle(Y_AXIS, inst.rotation);
+      S.setScalar(inst.scale);
+      mesh.setMatrixAt(i, M.compose(P, Q, S));
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+    // Attach the source list so raycast hits can resolve identity later (M2).
+    mesh.userData.instances = list;
+    meshes.push(mesh);
+  };
+
+  make(assets.trunkGeo, assets.trunkMat, trees, 'trunks');
+  make(assets.foliageGeo, assets.foliageMat, trees, 'foliage');
+  make(assets.foliage2Geo, assets.foliage2Mat, trees, 'foliage2');
+  make(assets.foliage3Geo, assets.foliageMat, trees, 'foliage3');
+  make(assets.rockGeo, assets.rockMat, rocks, 'rocks');
+  make(assets.bushGeo, assets.bushMat, bushes, 'bushes', false);
+  // Small plants — no shadow casting (cheap, and they'd shadow-flicker).
+  make(assets.flowerStemGeo, assets.flowerStemMat, flowers, 'flowerStems', false);
+  make(assets.flowerHeadGeo, assets.flowerHeadMat, flowers, 'flowerHeads', false);
+  make(assets.flowerCoreGeo, assets.flowerCoreMat, flowers, 'flowerCores', false);
+  make(assets.mushStemGeo, assets.mushStemMat, mushrooms, 'mushStems', false);
+  make(assets.mushCapGeo, assets.mushCapMat, mushrooms, 'mushCaps', false);
+  make(assets.herbGeo, assets.herbMat, herbs, 'herbs', false);
+  return meshes;
+}

@@ -1,0 +1,56 @@
+{
+  "name": "wyrdwood",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Wyrdwood \u2014 a 3D survival-crafting game",
+  "author": "Wyrdwood",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "electron:dev": "WYRDWOOD_DEV_URL=http://localhost:5173 electron .",
+    "app": "npm run build && electron .",
+    "dist": "npm run build && electron-builder",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "dist:win": "npm run build && electron-builder --win",
+    "assets": "node scripts/fetch-assets.mjs"
+  },
+  "build": {
+    "appId": "com.wyrdwood.game",
+    "productName": "Wyrdwood",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*"
+    ],
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.games"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "Game"
+    }
+  },
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.19.3",
+    "simplex-noise": "^4.0.3",
+    "three": "^0.185.1"
+  },
+  "devDependencies": {
+    "@types/three": "^0.185.1",
+    "electron": "^43.1.0",
+    "electron-builder": "^26.15.3",
+    "puppeteer-core": "^25.3.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.1.4"
+  }
+}
