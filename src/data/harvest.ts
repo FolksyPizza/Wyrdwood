@@ -19,7 +19,7 @@ export interface HarvestDef {
   verb: string;
 }
 
-export type HarvestType = 'tree' | 'rock' | 'bush' | 'flower' | 'mushroom' | 'herb';
+export type HarvestType = 'tree' | 'rock' | 'bush' | 'flower' | 'mushroom' | 'herb' | 'fern';
 
 export const HARVEST: Record<HarvestType, HarvestDef> = {
   tree: {
@@ -43,4 +43,5 @@ export const HARVEST: Record<HarvestType, HarvestDef> = {
   flower: { hits: 1, drops: [{ itemId: 'flower', count: 1 }], verb: 'Pick' },
   mushroom: { hits: 1, drops: [{ itemId: 'mushroom', count: 2 }], verb: 'Gather' },
   herb: { hits: 1, drops: [{ itemId: 'herb', count: 2 }], verb: 'Gather' },
+  fern: { hits: 1, drops: [{ itemId: 'herb', count: 1 }], verb: 'Gather' },
 };

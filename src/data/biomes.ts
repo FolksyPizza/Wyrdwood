@@ -13,12 +13,19 @@ export interface BiomeDef {
   flowerDensity: number;
   mushroomDensity: number;
   herbDensity: number;
+  fernDensity: number;
 }
 
+/**
+ * Densities are the probability that a 4 m scatter cell holds that object, and
+ * they're cumulative — so the numbers in a row also decide what *doesn't* grow.
+ * They were far too low: a forest with a 14% tree cell and nothing else in the
+ * understorey is a lawn with poles on it. Real ground is crowded.
+ */
 export const BIOMES: Record<BiomeId, BiomeDef> = {
-  shore: { id: 'shore', color: 0xb8a877, treeDensity: 0.0, rockDensity: 0.01, bushDensity: 0.005, flowerDensity: 0.01, mushroomDensity: 0, herbDensity: 0.01 },
-  meadow: { id: 'meadow', color: 0x6a8f3f, treeDensity: 0.012, rockDensity: 0.012, bushDensity: 0.03, flowerDensity: 0.06, mushroomDensity: 0.01, herbDensity: 0.04 },
-  forest: { id: 'forest', color: 0x49702f, treeDensity: 0.14, rockDensity: 0.02, bushDensity: 0.02, flowerDensity: 0.02, mushroomDensity: 0.05, herbDensity: 0.03 },
-  mountain: { id: 'mountain', color: 0x8b8578, treeDensity: 0.01, rockDensity: 0.09, bushDensity: 0, flowerDensity: 0.008, mushroomDensity: 0.005, herbDensity: 0.01 },
-  snow: { id: 'snow', color: 0xe8ecef, treeDensity: 0.0, rockDensity: 0.05, bushDensity: 0, flowerDensity: 0, mushroomDensity: 0, herbDensity: 0 },
+  shore:    { id: 'shore',    color: 0xb8a877, treeDensity: 0.004, rockDensity: 0.03, bushDensity: 0.02,  flowerDensity: 0.02, mushroomDensity: 0,     herbDensity: 0.03, fernDensity: 0.01 },
+  meadow:   { id: 'meadow',   color: 0x6a8f3f, treeDensity: 0.035, rockDensity: 0.02, bushDensity: 0.08,  flowerDensity: 0.14, mushroomDensity: 0.02, herbDensity: 0.10, fernDensity: 0.04 },
+  forest:   { id: 'forest',   color: 0x49702f, treeDensity: 0.26,  rockDensity: 0.03, bushDensity: 0.12,  flowerDensity: 0.05, mushroomDensity: 0.08, herbDensity: 0.07, fernDensity: 0.16 },
+  mountain: { id: 'mountain', color: 0x8b8578, treeDensity: 0.03,  rockDensity: 0.14, bushDensity: 0.03,  flowerDensity: 0.02, mushroomDensity: 0.01, herbDensity: 0.03, fernDensity: 0.02 },
+  snow:     { id: 'snow',     color: 0xe8ecef, treeDensity: 0.006, rockDensity: 0.07, bushDensity: 0,     flowerDensity: 0,    mushroomDensity: 0,     herbDensity: 0,    fernDensity: 0 },
 };

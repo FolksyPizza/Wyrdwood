@@ -5,7 +5,7 @@ import { SEA_LEVEL, type Terrain } from './terrain';
 import { worldClock } from '../render/textures';
 import { applyARM, loadPBR, makeLeafCluster } from '../render/assets';
 
-export type ScatterType = 'tree' | 'rock' | 'bush' | 'flower' | 'mushroom' | 'herb';
+export type ScatterType = 'tree' | 'rock' | 'bush' | 'flower' | 'mushroom' | 'herb' | 'fern';
 
 /** A scattered world object — serializable identity for harvesting. */
 export interface ScatterInstance {
@@ -56,9 +56,11 @@ export function scatterForChunk(
       else if (roll < (acc += biome.flowerDensity)) type = 'flower';
       else if (roll < (acc += biome.mushroomDensity)) type = 'mushroom';
       else if (roll < (acc += biome.herbDensity)) type = 'herb';
+      else if (roll < (acc += biome.fernDensity)) type = 'fern';
       if (!type) continue;
 
-      const isPlant = type === 'flower' || type === 'mushroom' || type === 'herb';
+      const isPlant =
+        type === 'flower' || type === 'mushroom' || type === 'herb' || type === 'fern';
       out.push({
         type,
         x,
@@ -90,25 +92,37 @@ export class ScatterAssets {
   readonly foliageMat = makeLeafMaterial();
   readonly foliage2Mat = this.foliageMat;
   readonly rockMat = makeRockMaterial();
-  readonly bushMat = this.foliageMat;
+  /** Bushes get their own leaf cluster from the shrub scan — broad leaves, some
+   * of them autumn-yellow, which is where most of the undergrowth's colour
+   * variation comes from. Reusing the tree canopy made every plant one green. */
+  readonly bushMat = makeLeafClusterMaterial('foliage/shrub', SHRUB_RECTS, 0x5117);
 
-  // Flowers: stem + petal head + bright center.
-  readonly flowerStemGeo = new THREE.CylinderGeometry(0.015, 0.02, 0.4, 4);
-  readonly flowerHeadGeo = new THREE.IcosahedronGeometry(0.11, 0);
-  readonly flowerCoreGeo = new THREE.SphereGeometry(0.05, 6, 5);
-  readonly flowerStemMat = new THREE.MeshStandardMaterial({ color: 0x4a7a3a, roughness: 0.9 });
-  readonly flowerHeadMat = new THREE.MeshStandardMaterial({ color: 0xe8d24a, roughness: 0.85, flatShading: true });
-  readonly flowerCoreMat = new THREE.MeshStandardMaterial({ color: 0xd98a3d, roughness: 0.8 });
+  // Flowers, ferns and herbs are photographs of real plants on crossed cards —
+  // the old icosahedron-on-a-stick and cone were the most obviously fake things
+  // in the undergrowth.
+  readonly flowerGeo = makePlantCards(FLOWER_RECTS, 0.34, 0.34, 3);
+  readonly flowerMat = makePlantMaterial(
+    makeLeafCluster('foliage/gazania', FLOWER_RECTS, { leaves: 9, seed: 0x0f10, size: 384 }),
+    0.34,
+  );
+  readonly fernGeo = makePlantCards(FERN_RECTS, 0.5, 0.75, 3);
+  readonly fernMat = makePlantMaterial(
+    loadPBR('foliage/fern', { alpha: true, arm: false }).map,
+    0.75,
+    loadPBR('foliage/fern', { alpha: true, arm: false }).alphaMap,
+  );
+  readonly herbGeo = makePlantCards(FERN_RECTS, 0.3, 0.34, 2);
+  readonly herbMat = makePlantMaterial(
+    loadPBR('foliage/nettle', { alpha: true, arm: false }).map,
+    0.34,
+    loadPBR('foliage/nettle', { alpha: true, arm: false }).alphaMap,
+  );
 
   // Mushrooms: pale stem + red spotted cap.
   readonly mushStemGeo = new THREE.CylinderGeometry(0.05, 0.07, 0.24, 6);
   readonly mushCapGeo = new THREE.SphereGeometry(0.16, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2);
   readonly mushStemMat = new THREE.MeshStandardMaterial({ color: 0xe4d8c0, roughness: 0.9 });
   readonly mushCapMat = new THREE.MeshStandardMaterial({ color: 0xb43b32, roughness: 0.8, flatShading: true });
-
-  // Herbs: small low leafy cluster.
-  readonly herbGeo = new THREE.ConeGeometry(0.16, 0.36, 5);
-  readonly herbMat = new THREE.MeshStandardMaterial({ color: 0x5b8a3a, roughness: 0.9, flatShading: true });
 
   // Grass tuft: a small fan of blade-quads (decorative, non-interactive).
   readonly grassGeo = makeGrassTuft();
@@ -123,14 +137,9 @@ export class ScatterAssets {
     this.foliage3Geo.translate(0, 2.7, 0);
     this.bushGeo.scale(1, 0.8, 1);
     this.bushGeo.translate(0, 0.15, 0);
-    // Plant pivots at ground level.
-    this.flowerStemGeo.translate(0, 0.2, 0);
-    this.flowerHeadGeo.scale(1, 0.6, 1);
-    this.flowerHeadGeo.translate(0, 0.42, 0);
-    this.flowerCoreGeo.translate(0, 0.44, 0);
+    // Plant cards already pivot at ground level (makePlantCards translates them).
     this.mushStemGeo.translate(0, 0.12, 0);
     this.mushCapGeo.translate(0, 0.24, 0);
-    this.herbGeo.translate(0, 0.18, 0);
   }
 }
 
@@ -239,7 +248,16 @@ const LEAF_RECTS = [
 ];
 
 function makeLeafMaterial(): THREE.MeshStandardMaterial {
-  const cluster = makeLeafCluster('foliage/leaves', LEAF_RECTS, { leaves: 38, seed: 0xbeef });
+  return makeLeafClusterMaterial('foliage/leaves', LEAF_RECTS, 0xbeef);
+}
+
+/** Canopy/bush material: leaves stamped from a scan into a clump card. */
+function makeLeafClusterMaterial(
+  atlas: string,
+  rects: { u: number; v: number; w: number; h: number }[],
+  seed: number,
+): THREE.MeshStandardMaterial {
+  const cluster = makeLeafCluster(atlas, rects, { leaves: 110, seed });
   const mat = new THREE.MeshStandardMaterial({
     map: cluster,
     // The cluster texture carries its own alpha, so cut straight from it.
@@ -274,6 +292,102 @@ function makeLeafMaterial(): THREE.MeshStandardMaterial {
   };
   return mat;
 }
+
+/**
+ * Crossed billboards for a single plant, each card UV'd to a different specimen
+ * in a scanned atlas. Same trick as the grass tuft: two or three quads at an
+ * angle read as a volume from any direction, and the alpha cutout does the rest.
+ */
+function makePlantCards(
+  rects: { u: number; v: number; w: number; h: number }[],
+  width: number,
+  height: number,
+  cards = 2,
+): THREE.BufferGeometry {
+  const geos: THREE.BufferGeometry[] = [];
+  for (let i = 0; i < cards; i++) {
+    const g = new THREE.PlaneGeometry(width, height, 1, 3);
+    g.translate(0, height / 2, 0);
+    g.rotateY((i / cards) * Math.PI);
+    const r = rects[i % rects.length]!;
+    const uv = g.getAttribute('uv') as THREE.BufferAttribute;
+    for (let v = 0; v < uv.count; v++) {
+      uv.setXY(v, r.u + uv.getX(v) * r.w, r.v + uv.getY(v) * r.h);
+    }
+    geos.push(g);
+  }
+  return mergeGeometries(geos);
+}
+
+/** A matte, alpha-cut, wind-swayed material for a plant billboard.
+ * `alphaMap` is null when the map already carries its own alpha (a composited
+ * cluster canvas does; a raw scanned atlas keeps its mask in a separate image). */
+function makePlantMaterial(
+  map: THREE.Texture,
+  swayHeight: number,
+  alphaMap: THREE.Texture | null = null,
+): THREE.MeshStandardMaterial {
+  const mat = new THREE.MeshStandardMaterial({
+    map,
+    alphaMap,
+    alphaTest: 0.42,
+    side: THREE.DoubleSide,
+    // Vegetation is uniformly rough. A scanned roughness map here makes plants
+    // mirror the sky and turn silver (see the grass material).
+    roughness: 0.95,
+    metalness: 0,
+  });
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms['uWind'] = worldClock;
+    sh.vertexShader =
+      'uniform float uWind;\n' +
+      sh.vertexShader
+        // Shade with a mostly-upward normal, or each vertical card lights like a
+        // little wall and the undergrowth reads as shiny litter.
+        .replace(
+          '#include <beginnormal_vertex>',
+          `vec3 objectNormal = normalize(vec3(0.0, 1.0, 0.0) + normal * 0.35);`,
+        )
+        .replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
+         float h = clamp(position.y / ${swayHeight.toFixed(2)}, 0.0, 1.0);
+         float wph = uWind * 1.3 + instanceMatrix[3].x * 0.3 + instanceMatrix[3].z * 0.3;
+         float bend = h * h * 0.09;
+         transformed.x += sin(wph) * bend;
+         transformed.z += cos(wph * 0.7) * bend * 0.7;`,
+        );
+  };
+  return mat;
+}
+
+/** Fern fronds — five specimens in the scan, all upright. */
+const FERN_RECTS = [
+  { u: 0.093, v: 0.092, w: 0.152, h: 0.81 },
+  { u: 0.313, v: 0.219, w: 0.147, h: 0.742 },
+  { u: 0.532, v: 0.482, w: 0.142, h: 0.498 },
+  { u: 0.737, v: 0.131, w: 0.112, h: 0.771 },
+  { u: 0.513, v: 0.121, w: 0.112, h: 0.381 },
+];
+
+/** Broad shrub leaves — green *and* autumn-yellow, which is most of where the
+ * undergrowth's colour variation comes from. */
+const SHRUB_RECTS = [
+  { u: 0.45, v: 0.68, w: 0.23, h: 0.3 },
+  { u: 0.73, v: 0.69, w: 0.16, h: 0.24 },
+  { u: 0.22, v: 0.2, w: 0.22, h: 0.32 },
+  { u: 0.72, v: 0.22, w: 0.21, h: 0.32 },
+  { u: 0.05, v: 0.72, w: 0.13, h: 0.22 }, // autumn yellow
+  { u: 0.02, v: 0.06, w: 0.19, h: 0.28 }, // autumn yellow
+];
+
+/** Gazania: two open flower heads plus its lobed leaves. */
+const FLOWER_RECTS = [
+  { u: 0.02, v: 0.023, w: 0.3, h: 0.318 }, // big bloom
+  { u: 0.39, v: 0.062, w: 0.225, h: 0.21 }, // second bloom
+  { u: 0.273, v: 0.317, w: 0.41, h: 0.176 }, // leaf
+  { u: 0.605, v: 0.385, w: 0.37, h: 0.107 }, // leaf
+];
 
 /**
  * Grass tuft: crossed billboards carrying a *photograph* of a real grass clump,
@@ -415,6 +529,14 @@ function makeGrassMaterial(): THREE.MeshStandardMaterial {
   return mat;
 }
 
+const TINT = new THREE.Color();
+
+/** Stable [0,1) hash from a world position — same tree, same colour, every load. */
+function hash01(x: number, z: number, salt: number): number {
+  const n = Math.sin(x * 12.9898 + z * 78.233 + salt * 37.719) * 43758.5453;
+  return n - Math.floor(n);
+}
+
 const M = new THREE.Matrix4();
 const P = new THREE.Vector3();
 const Q = new THREE.Quaternion();
@@ -432,6 +554,7 @@ export function buildScatterMeshes(
   const flowers = instances.filter((i) => i.type === 'flower');
   const mushrooms = instances.filter((i) => i.type === 'mushroom');
   const herbs = instances.filter((i) => i.type === 'herb');
+  const ferns = instances.filter((i) => i.type === 'fern');
 
   const meshes: THREE.InstancedMesh[] = [];
   const make = (
@@ -440,6 +563,8 @@ export function buildScatterMeshes(
     list: ScatterInstance[],
     name: string,
     castShadow = true,
+    /** Per-instance colour jitter — see TINT below. 0 = leave the texture alone. */
+    tint = 0,
   ) => {
     if (list.length === 0) return;
     const mesh = new THREE.InstancedMesh(geo, mat, list.length);
@@ -449,27 +574,44 @@ export function buildScatterMeshes(
     list.forEach((inst, i) => {
       P.set(inst.x, inst.y, inst.z);
       Q.setFromAxisAngle(Y_AXIS, inst.rotation);
-      S.setScalar(inst.scale);
+      // Trees vary in height as well as girth — scaling uniformly makes a forest
+      // of identical trees at different sizes, which the eye reads as a repeat.
+      S.set(inst.scale, inst.scale * (0.85 + hash01(inst.x, inst.z, 31) * 0.45), inst.scale);
       mesh.setMatrixAt(i, M.compose(P, Q, S));
+
+      if (tint > 0) {
+        // A real stand of trees is not one green: individuals differ in hue
+        // (yellow-green through blue-green) and in how much light they've had.
+        // One colour for the whole species is the loudest "instanced" tell there
+        // is, and it costs nothing to break it.
+        const t = hash01(inst.x, inst.z, 17);
+        const shade = hash01(inst.x, inst.z, 23);
+        TINT.setHSL(
+          0.22 + t * 0.09 * tint, // yellow-green → blue-green
+          0.35 + t * 0.25,
+          0.72 + (shade - 0.5) * 0.3 * tint,
+        );
+        mesh.setColorAt(i, TINT);
+      }
     });
     mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     // Attach the source list so raycast hits can resolve identity later (M2).
     mesh.userData.instances = list;
     meshes.push(mesh);
   };
 
-  make(assets.trunkGeo, assets.trunkMat, trees, 'trunks');
-  make(assets.foliageGeo, assets.foliageMat, trees, 'foliage');
-  make(assets.foliage2Geo, assets.foliage2Mat, trees, 'foliage2');
-  make(assets.foliage3Geo, assets.foliageMat, trees, 'foliage3');
-  make(assets.rockGeo, assets.rockMat, rocks, 'rocks');
-  make(assets.bushGeo, assets.bushMat, bushes, 'bushes', false);
+  make(assets.trunkGeo, assets.trunkMat, trees, 'trunks', true, 0.25);
+  make(assets.foliageGeo, assets.foliageMat, trees, 'foliage', true, 1);
+  make(assets.foliage2Geo, assets.foliage2Mat, trees, 'foliage2', true, 1);
+  make(assets.foliage3Geo, assets.foliageMat, trees, 'foliage3', true, 1);
+  make(assets.rockGeo, assets.rockMat, rocks, 'rocks', true, 0.3);
+  make(assets.bushGeo, assets.bushMat, bushes, 'bushes', false, 1);
   // Small plants — no shadow casting (cheap, and they'd shadow-flicker).
-  make(assets.flowerStemGeo, assets.flowerStemMat, flowers, 'flowerStems', false);
-  make(assets.flowerHeadGeo, assets.flowerHeadMat, flowers, 'flowerHeads', false);
-  make(assets.flowerCoreGeo, assets.flowerCoreMat, flowers, 'flowerCores', false);
+  make(assets.flowerGeo, assets.flowerMat, flowers, 'flowers', false);
+  make(assets.fernGeo, assets.fernMat, ferns, 'ferns', false);
+  make(assets.herbGeo, assets.herbMat, herbs, 'herbs', false);
   make(assets.mushStemGeo, assets.mushStemMat, mushrooms, 'mushStems', false);
   make(assets.mushCapGeo, assets.mushCapMat, mushrooms, 'mushCaps', false);
-  make(assets.herbGeo, assets.herbMat, herbs, 'herbs', false);
   return meshes;
 }

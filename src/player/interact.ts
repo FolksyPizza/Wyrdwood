@@ -19,6 +19,7 @@ const HARVEST_SKILL: Record<ScatterType, SkillId> = {
   flower: 'foraging',
   mushroom: 'foraging',
   herb: 'foraging',
+  fern: 'foraging',
 };
 
 const SCATTER_NAMES: Record<ScatterType, string> = {
@@ -27,7 +28,8 @@ const SCATTER_NAMES: Record<ScatterType, string> = {
   bush: 'Berry Bush',
   flower: 'Flower',
   mushroom: 'Mushroom',
-  herb: 'Herb',
+  herb: 'Nettle',
+  fern: 'Fern',
 };
 
 const RANGE = 4.0;

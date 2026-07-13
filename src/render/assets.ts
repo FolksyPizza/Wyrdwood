@@ -147,7 +147,7 @@ export function makeLeafCluster(
   rects: AtlasRect[],
   opts: { size?: number; leaves?: number; seed?: number } = {},
 ): THREE.Texture {
-  const { size = 512, leaves = 34, seed = 1 } = opts;
+  const { size = 512, leaves = 90, seed = 1 } = opts;
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
@@ -195,7 +195,10 @@ export function makeLeafCluster(
       const rad = Math.sqrt(rnd()) * size * 0.34;
       const cx = size / 2 + Math.cos(a) * rad;
       const cy = size / 2 + Math.sin(a) * rad;
-      const scale = (size / 3.1) * (0.55 + rnd() * 0.6);
+      // Leaf size relative to the card. A card is ~2 m of canopy, so a leaf must
+      // be a small fraction of it — at 1/3 of the card (the first attempt) every
+      // leaf was nearly a metre across and the tree looked like a houseplant.
+      const scale = (size / 7.5) * (0.6 + rnd() * 0.7);
       const aspect = sh / sw;
 
       ctx.save();
