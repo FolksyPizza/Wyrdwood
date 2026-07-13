@@ -18,7 +18,17 @@ export interface ItemDef {
   /** Tool: speeds up matching harvests (fewer hits per object). */
   tool?: { kind: ToolKind };
   /** Weapon: melee damage when swung (LMB). */
-  weapon?: { damage: number; knockback?: number };
+  weapon?: {
+    damage: number;
+    knockback?: number;
+    /**
+     * Seconds the swing takes — which is also how long until you can swing
+     * again. Heft is the whole trade: a club hits hard but leaves you exposed
+     * while you recover, a knife is quick and weak. A single global cooldown
+     * would flatten all of that into one weapon with different numbers on it.
+     */
+    swingTime: number;
+  };
   /** Placeable: right-click places this object in the world. */
   placeable?: PlaceableKind;
 }
@@ -39,7 +49,7 @@ export const ITEMS: Record<string, ItemDef> = {
     icon: '🪓',
     stackSize: 1,
     tool: { kind: 'axe' },
-    weapon: { damage: 12 },
+    weapon: { damage: 12, swingTime: 0.7 },
   },
   stone_pickaxe: {
     id: 'stone_pickaxe',
@@ -47,14 +57,14 @@ export const ITEMS: Record<string, ItemDef> = {
     icon: '⛏️',
     stackSize: 1,
     tool: { kind: 'pickaxe' },
-    weapon: { damage: 9 },
+    weapon: { damage: 9, swingTime: 0.8 },
   },
   club: {
     id: 'club',
     name: 'Wooden Club',
     icon: '🏏',
     stackSize: 1,
-    weapon: { damage: 10, knockback: 1.5 },
+    weapon: { damage: 10, knockback: 1.5, swingTime: 0.85 }, // heavy, slow
   },
   meat: {
     id: 'meat',

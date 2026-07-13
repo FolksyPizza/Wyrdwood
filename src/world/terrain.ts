@@ -24,6 +24,7 @@ export class Terrain {
   private valleys: LayeredNoise;
   private warp: LayeredNoise;
   private strataMask: LayeredNoise;
+  private rugged: LayeredNoise;
 
   // ── Per-world character, derived from the seed ────────────────────────────
   //
@@ -61,6 +62,8 @@ export class Terrain {
     this.valleys = new LayeredNoise(seed ^ 0x91a2b3, 2, 1 / 420, 0.5);
     this.warp = new LayeredNoise(seed ^ 0xe9fa0b, 2, 1 / 300, 0.5);
     this.strataMask = new LayeredNoise(seed ^ 0x7c8d9e, 2, 1 / 180, 0.5);
+    // High-frequency break-up, used only on rock — see height().
+    this.rugged = new LayeredNoise(seed ^ 0x3b4c5d, 3, 1 / 13, 0.55);
   }
 
   /**
@@ -129,6 +132,12 @@ export class Terrain {
       const stepped = (floorBand + smoothstep(0.6, 1.0, frac)) * this.strataStep;
       y += (stepped - y) * exposed * 0.6;
     }
+
+    // Rock is *rough*. Smooth stone reads as clay however good the texture is, so
+    // the upland gets a high-frequency break-up the lowland doesn't — that's what
+    // gives a cliff its broken, faceted surface and somewhere for the ambient
+    // occlusion to bite.
+    y += uplift * this.rugged.sample(x, z) * 2.6;
 
     return y + d * 1.6;
   }

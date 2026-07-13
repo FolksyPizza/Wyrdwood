@@ -95,11 +95,18 @@ export class Humanoid {
     this.setAppearance(appearance);
   }
 
-  /** Trigger a melee swing animation. */
-  swing(): void {
-    this.swingTimer = 0.45;
+  /**
+   * Trigger a melee swing. `duration` is the weapon's swing time — the clip is
+   * time-scaled to fill exactly that, so a heavy club visibly takes longer to
+   * come round than a knife rather than both playing the same animation and
+   * differing only in a hidden cooldown number.
+   */
+  swing(duration = 0.45): void {
+    this.swingTimer = duration;
     if (this.attack) {
+      const clipLength = this.attack.getClip().duration;
       this.attack.reset().setLoop(THREE.LoopOnce, 1).fadeIn(0.08).play();
+      this.attack.timeScale = clipLength / Math.max(0.1, duration);
       this.current?.fadeOut(0.08);
       this.current = this.attack;
     }
@@ -205,7 +212,9 @@ export class Humanoid {
     // effort rather than as slow motion.
     const cur = this.current;
     const uphill = Math.max(0, this.grade);
-    if (cur) {
+    // Leave the attack alone: swing() time-scaled it to the weapon's swing time,
+    // and this runs every frame, so it would stamp that straight back to 1.
+    if (cur && cur !== this.attack) {
       if (cur === this.walk) cur.timeScale = Math.max(0.6, speed / 2.2) * (1 + uphill * 0.35);
       else if (cur === this.run) cur.timeScale = Math.max(0.7, speed / 6) * (1 + uphill * 0.25);
       else cur.timeScale = 1;

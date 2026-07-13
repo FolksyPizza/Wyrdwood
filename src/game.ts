@@ -43,8 +43,8 @@ import { writeSave, clearSave, type SaveData } from './save/save';
 import type { SkillId } from './data/skills';
 import type { ItemStack } from './items/inventory';
 
-/** Minimum seconds between melee swings — roughly the length of the swing anim. */
-const SWING_COOLDOWN = 0.55;
+/** Recovery for a bare-handed punch. Weapons carry their own `swingTime`. */
+const FIST_SWING_TIME = 0.45;
 
 interface Grave {
   x: number;
@@ -450,10 +450,15 @@ export class Game {
       this.input.consumeLeftClick()
     ) {
       if (this.stats.spend(8)) {
-        this.swingCooldown = SWING_COOLDOWN;
-        this.player.humanoid.swing();
         const active = this.inventory.active;
-        const damage = (active ? itemDef(active.itemId).weapon?.damage : null) ?? 4;
+        const weapon = active ? itemDef(active.itemId).weapon : undefined;
+        // The cooldown *is* the swing: you cannot throw the next one until this
+        // one has played out. So the animation and the cooldown are driven from
+        // the same number, and a heavier weapon is genuinely slower.
+        const swingTime = weapon?.swingTime ?? FIST_SWING_TIME;
+        this.swingCooldown = swingTime;
+        this.player.humanoid.swing(swingTime);
+        const damage = weapon?.damage ?? 4;
         const hit = this.mobs.swingAt(
           this.player.position,
           this.camera.yaw + Math.PI,

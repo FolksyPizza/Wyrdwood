@@ -59,8 +59,15 @@ export function makeTerrainMaterial(): THREE.MeshStandardMaterial {
     sh.uniforms['uScale'] = { value: uScale };
 
     sh.vertexShader =
-      'attribute vec4 aSplat;\nvarying vec4 vSplat;\n' +
-      sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>\n  vSplat = aSplat;`);
+      'attribute vec4 aSplat;\nvarying vec4 vSplat;\nvarying vec3 vWPos;\nvarying vec3 vWNor;\n' +
+      sh.vertexShader.replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+         vSplat = aSplat;
+         // World position and normal, for triplanar rock (see the fragment shader).
+         vWPos = (modelMatrix * vec4(position, 1.0)).xyz;
+         vWNor = normalize(mat3(modelMatrix) * normal);`,
+      );
 
     sh.fragmentShader =
       `
@@ -70,8 +77,33 @@ export function makeTerrainMaterial(): THREE.MeshStandardMaterial {
       uniform sampler2D uSnowMap,  uSnowNor,  uSnowArm;
       uniform vec4 uScale;
       varying vec4 vSplat;
+      varying vec3 vWPos;
+      varying vec3 vWNor;
       vec3 splatArm;
       vec3 splatNor;
+
+      /**
+       * Triplanar sampling.
+       *
+       * The terrain's UVs are a flat top-down projection (world X,Z). That is
+       * fine for a meadow, but on a cliff face — where the surface is nearly
+       * vertical — the projected UVs barely change as you climb, so the texture
+       * gets smeared into long vertical streaks. It is *the* reason cliffs look
+       * like painted cardboard.
+       *
+       * Triplanar fixes it by projecting from all three axes and blending by the
+       * surface normal: the wall gets its texture from a side projection, the
+       * ledge from the top one, and neither is stretched. It costs 3 samples
+       * instead of 1, so it is used only for the rock layer, where it matters.
+       */
+      vec3 triplanar(sampler2D tex, vec3 p, vec3 n, float scale) {
+        vec3 b = abs(n);
+        b = pow(b, vec3(4.0));          // sharpen, so faces don't cross-fade to mud
+        b /= (b.x + b.y + b.z);
+        return texture2D(tex, p.yz * scale).rgb * b.x
+             + texture2D(tex, p.xz * scale).rgb * b.y
+             + texture2D(tex, p.xy * scale).rgb * b.z;
+      }
       ` +
       sh.fragmentShader
         .replace(
@@ -83,21 +115,28 @@ export function makeTerrainMaterial(): THREE.MeshStandardMaterial {
           vec2 sUv = vMapUv * uScale.z;
           vec2 nUv = vMapUv * uScale.w;
 
+          vec3 wn = normalize(vWNor);
+          // Rock is triplanar; everything else keeps the cheap planar projection,
+          // because grass/sand/snow only ever sit on ground you can stand on.
+          vec3 rockAlbedo = triplanar(uRockMap, vWPos, wn, uScale.y);
+          vec3 rockNor    = triplanar(uRockNor, vWPos, wn, uScale.y);
+          vec3 rockArm    = triplanar(uRockArm, vWPos, wn, uScale.y);
+
           vec3 albedo =
               texture2D(uGrassMap, gUv).rgb * w.x
-            + texture2D(uRockMap,  rUv).rgb * w.y
+            + rockAlbedo                    * w.y
             + texture2D(uSandMap,  sUv).rgb * w.z
             + texture2D(uSnowMap,  nUv).rgb * w.w;
 
           splatNor =
               texture2D(uGrassNor, gUv).xyz * w.x
-            + texture2D(uRockNor,  rUv).xyz * w.y
+            + rockNor                       * w.y
             + texture2D(uSandNor,  sUv).xyz * w.z
             + texture2D(uSnowNor,  nUv).xyz * w.w;
 
           splatArm =
               texture2D(uGrassArm, gUv).rgb * w.x
-            + texture2D(uRockArm,  rUv).rgb * w.y
+            + rockArm                       * w.y
             + texture2D(uSandArm,  sUv).rgb * w.z
             + texture2D(uSnowArm,  nUv).rgb * w.w;
 
@@ -107,6 +146,22 @@ export function makeTerrainMaterial(): THREE.MeshStandardMaterial {
           float macro = 0.86
             + 0.18 * sin(vMapUv.x * 0.021 + 1.7)
             * cos(vMapUv.y * 0.017 - 0.6);
+
+          // Rock is not one colour. Real cliff faces run from cold blue-grey in
+          // the shade to warm iron-stained ochre where they've weathered, with
+          // lichen in the damp. A slow noise between two of those, plus a darker
+          // wash down in the gullies, is most of what stops a mountain reading as
+          // one flat quarry wall.
+          float stain = 0.5 + 0.5 * sin(vWPos.x * 0.021 + vWPos.z * 0.017 + vWPos.y * 0.03);
+          vec3 coldRock = vec3(0.90, 0.94, 1.02);   // shaded granite
+          vec3 warmRock = vec3(1.05, 1.00, 0.93);   // sun-baked, faintly iron-stained
+          vec3 rockTint = mix(coldRock, warmRock, stain);
+          // Lichen: greenish, and only on surfaces flat enough to hold moisture.
+          float lichen = smoothstep(0.55, 0.9, wn.y) *
+                         smoothstep(0.45, 0.75, sin(vWPos.x * 0.09) * cos(vWPos.z * 0.11) * 0.5 + 0.5);
+          rockTint = mix(rockTint, vec3(0.74, 0.86, 0.66), lichen * 0.3);
+
+          albedo = mix(albedo, albedo * rockTint, w.y);
           diffuseColor.rgb *= albedo * macro;
           `,
         )

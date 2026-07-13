@@ -35,7 +35,10 @@ const KIT = {
   'terrain/grass': { asset: 'leafy_grass', maps: { diff: 'Diffuse', nor: 'nor_gl', arm: 'arm' } },
   'terrain/forest': { asset: 'forest_ground_04', maps: { diff: 'Diffuse', nor: 'nor_gl', arm: 'arm' } },
   'terrain/dirt': { asset: 'brown_mud_leaves_01', maps: { diff: 'Diffuse', nor: 'nor_gl', arm: 'arm' } },
-  'terrain/rock': { asset: 'rock_face_03', maps: { diff: 'Diffuse', nor: 'nor_gl', arm: 'arm' } },
+  // Grey granite, not the warm brown rock_face_03 — that scan is what made the
+  // mountains look like sand dunes. Real upland rock is cool grey-blue.
+  'terrain/rock': { asset: 'gray_rocks', maps: { diff: 'Diffuse', nor: 'nor_gl', arm: 'arm' } },
+  'terrain/cliff': { asset: 'rock_wall_02', maps: { diff: 'Diffuse', nor: 'nor_gl', arm: 'arm' } },
   'terrain/sand': { asset: 'coast_sand_05', maps: { diff: 'Diffuse', nor: 'nor_gl', arm: 'arm' } },
   'terrain/snow': { asset: 'snow_02', maps: { diff: 'Diffuse', nor: 'nor_gl', arm: 'arm' } },
 

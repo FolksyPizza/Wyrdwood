@@ -271,10 +271,16 @@ export class ChunkManager {
         // Ground-layer weights. Rock takes over on steep faces, sand hugs the
         // waterline, snow caps the peaks, grass fills the rest.
         const slope = 1 - ny; // 0 flat … ~1 vertical
-        // Rock takes over earlier and harder — a slope past ~0.35 will not hold
-        // soil, and painting grass onto cliff faces is what made the mountains
-        // look like green pillows.
-        const wRock = smoothstep(0.18, 0.5, slope);
+        // Rock comes from TWO things, and the splat only had one of them.
+        //
+        //  - Slope: past ~0.35 the ground will not hold soil, so it's bare.
+        //  - Altitude: above the treeline the ground is bare *regardless* of how
+        //    gentle it is. Without this, a broad mountain shoulder is flat enough
+        //    to score as "grass", so the whole massif was rendering the brown
+        //    forest-floor texture and reading as a sand dune. That was the tan.
+        const rockBySlope = smoothstep(0.18, 0.5, slope);
+        const rockByAltitude = smoothstep(28, 46, wy);
+        const wRock = Math.max(rockBySlope, rockByAltitude);
         const wSand = 1 - smoothstep(0.4, 2.6, wy - SEA_LEVEL);
         const wSnow = smoothstep(58, 74, wy) * (1 - smoothstep(0.55, 0.95, slope));
         const wGrass = Math.max(0, 1 - wRock - wSand - wSnow);
@@ -283,11 +289,13 @@ export class ChunkManager {
         splat[vi * 4 + 2] = wSand;
         splat[vi * 4 + 3] = wSnow;
 
-        // Biome tint. The albedo now comes from a photoscan, so this is a gentle
-        // nudge towards the biome's hue — at full saturation it would double up
-        // with the texture's own colour and go radioactive.
+        // Biome tint. The albedo comes from a photoscan, so this is only a nudge
+        // towards the biome's hue. Keep it *small*: every multiplier we lay over
+        // a scan pulls it away from the photograph and towards flat paint, and
+        // stacking tint × macro-variation × AO is exactly why the in-game
+        // surfaces read as less real than the source images do.
         color.setHex(this.terrain.biomeAt(wx, wz, wy).color);
-        const tint = 0.35;
+        const tint = 0.18;
         let r = 1 + (color.r - 1) * tint;
         let g = 1 + (color.g - 1) * tint;
         let b = 1 + (color.b - 1) * tint;
